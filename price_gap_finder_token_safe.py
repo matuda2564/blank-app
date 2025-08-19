@@ -9,12 +9,16 @@ import random
 import statistics
 from typing import Any, Dict, Optional, Tuple, List, Iterable
 
-import pandas as pd
+try:
+	import pandas as pd
+except Exception:
+	print("[FATAL] pandas を import できません。`pip install pandas keepa` を実行してください。", file=sys.stderr)
+	raise
 
 try:
 	import keepa  # type: ignore
 except Exception:
-	print("[FATAL] keepa を import できません。`pip install keepa` を実行してください。", file=sys.stderr)
+	print("[FATAL] keepa を import できません。`pip install keepa pandas` を実行してください。", file=sys.stderr)
 	raise
 
 
