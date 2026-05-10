@@ -1,1 +1,7 @@
 streamlit
+requests
+python-dotenv
+pandas
+openpyxl
+boto3
+cryptography
