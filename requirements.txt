@@ -5,3 +5,5 @@ pandas
 openpyxl
 boto3
 cryptography
+openai
+google-generativeai
