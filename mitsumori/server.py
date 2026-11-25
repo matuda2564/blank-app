@@ -44,8 +44,18 @@ def state():
 
 
 def serialize(vendors):
-    """結果を画面用にまとめる。根拠の画像は、要確認・違い・画像一致の行だけ付ける(軽くするため)"""
-    out = []
+    """結果を画面用にまとめる。根拠の画像は、要確認・違い・画像一致の行だけ付ける(軽くするため)。
+    書類全体の画像(確認ビュー用)は、ページごとに1回だけ入れて、行からは番号で参照する"""
+    out, pages, pid = [], {}, {}
+
+    def page_id(doc, pno):
+        k = (doc.path, pno)
+        if k not in pid:
+            pid[k] = f"p{len(pid)}"
+            try: pages[pid[k]] = "data:image/jpeg;base64," + C.page_jpeg_b64(doc, pno)
+            except Exception: pages[pid[k]] = None
+        return pid[k] if pages.get(pid[k]) else None
+
     for v in vendors:
         sv = {"vendor": v["vendor"], "warnings": v["warnings"], "pairs": [], "seconds": round(v.get("seconds", 0), 1),
               "count": {"OK": 0, "OK_IMG": 0, "DIFF": 0, "REVIEW": 0, "NOPAIR": 0}}
@@ -62,10 +72,18 @@ def serialize(vendors):
                     row["oimg"] = C.crop_b64(o, r["orow"]) if o and r["orow"] else None
                     row["qraw"] = r["qrow"]["raw"] if r["qrow"] else None
                     row["oraw"] = r["orow"]["raw"] if r["orow"] else None
+                    for side, d, rr in (("q", q, r["qrow"]), ("o", o, r["orow"])):
+                        box = C.row_box(d, rr) if d and rr else None
+                        row[side + "box"] = box
+                        row[side + "page"] = page_id(d, rr.get("page", 0)) if box else None
+                    if r.get("doc"):   # 書類全体の問題: 両方の書類の1ページ目を、枠なしで見せる
+                        for sd, dd in (("q", q), ("o", o)):
+                            if dd and dd.pages and not row.get(sd + "page"): row[sd + "page"] = page_id(dd, 0)
+                    row["docflag"] = r.get("doc")
                 sp["rows"].append(row)
             sv["pairs"].append(sp)
         out.append(sv)
-    return out
+    return {"vendors": out, "pages": pages}
 
 
 def run_job():

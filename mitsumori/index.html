@@ -33,6 +33,20 @@ button.rst{background:#fff;color:var(--ng);border:2px solid var(--ng)}button.sv{
 label.chk{float:right;font-size:14px;cursor:pointer}.done{opacity:.45}
 details summary{cursor:pointer;color:var(--sub);margin:4px 0}
 .warn{background:var(--rvbg);border-radius:6px;padding:6px 10px;margin:6px 0}.err{background:var(--ngbg);border-radius:6px;padding:8px 12px}
+button.sm{font:inherit;font-size:14px;padding:4px 12px;border-radius:6px;border:1px solid var(--pri);background:#fff;color:var(--pri);cursor:pointer}
+button.sm.pri{background:var(--pri);color:#fff}
+.vw{position:fixed;inset:0;background:rgba(20,28,40,.62);z-index:50;display:flex;align-items:center;justify-content:center}.vw[hidden]{display:none}
+.vbox{background:#fff;border-radius:12px;width:min(1500px,97vw);height:95vh;display:flex;flex-direction:column;padding:10px 14px}
+.vh{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.vh b{font-size:18px}.vh .sp{flex:1}
+#vmsg{margin:6px 0;padding:6px 10px;border-radius:6px;font-size:15px;background:#f1f3f6}
+.vbody{flex:1;display:flex;gap:10px;min-height:0}.pane{flex:1;display:flex;flex-direction:column;min-width:0}.pane>small{color:var(--sub);margin:2px 0}
+.pg{flex:1;overflow:auto;border:1px solid #bcc6d4;border-radius:6px;background:#eef1f5;position:relative}
+.pgin{position:relative;display:inline-block;width:100%}.pgin img{width:100%;display:block}
+.bx{position:absolute;border:4px solid #e11d2e;border-radius:4px;box-shadow:0 0 0 9999px rgba(0,0,0,.0),0 0 10px rgba(225,29,46,.8);pointer-events:none}
+.bx.OK_IMG{border-color:#2f6fd6;box-shadow:0 0 10px rgba(47,111,214,.8)}
+.vf{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:8px}.vf .sp{flex:1}
+.vf button{font:inherit;font-size:16px;padding:10px 18px;border-radius:8px;border:2px solid var(--pri);background:#fff;color:var(--pri);cursor:pointer;font-weight:700}.vf button.go{background:var(--pri);color:#fff}
+.vf label{font-size:16px;cursor:pointer}.kbd{font-size:12px;color:var(--sub)}
 @media print{header,.slots,.bar,.note{display:none}}
 </style></head><body>
 <header><h1>見積・発注 照合</h1><small id="ver"></small><small>書類はこのパソコンの中だけで処理します(外には送りません)</small></header>
@@ -50,9 +64,15 @@ details summary{cursor:pointer;color:var(--sub);margin:4px 0}
 </div>
 <div id="out"></div>
 </main>
+<div class="vw" id="vw" hidden><div class="vbox">
+ <div class="vh"><b id="vcnt"></b><span id="vtitle"></span><span class="sp"></span><span class="kbd">キー: ← →=前後 / Enter=確認して次へ / Esc=閉じる</span><button class="sm" id="vx">✕ 閉じる</button></div>
+ <div id="vmsg"></div>
+ <div class="vbody"><div class="pane"><small>見積(赤枠が、確認する行)</small><div class="pg" id="vq"></div></div><div class="pane"><small>発注(赤枠が、確認する行)</small><div class="pg" id="vo"></div></div></div>
+ <div class="vf"><button id="vprev">◀ 前へ</button><label><input type="checkbox" id="vchk"> 確認した</label><span class="sp"></span><button class="go" id="vok">確認した → 次の未確認へ</button><button id="vnext">次へ ▶</button></div>
+</div></div>
 <script>
 const $=id=>document.getElementById(id), ROLES=['見積','発注'];
-let ST=null, timer=null;
+let ST=null, timer=null, PAGES={}, ITEMS=[], CUR=-1;
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 async function api(path,opt){const r=await fetch(path,opt);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j}
 async function refresh(){ST=await api('/api/state');render()}
@@ -95,9 +115,10 @@ async function showResult(){
  const r=await api('/api/result');
  if(r.status==='error'){$('out').innerHTML=`<div class="err">照合に失敗しました: ${esc(r.msg)}</div>`;return}
  if(r.status!=='done')return;
- const tot={OK:0,OK_IMG:0,DIFF:0,REVIEW:0,NOPAIR:0};r.result.forEach(v=>{for(const k in tot)tot[k]+=v.count[k]});
+ const R=r.result.vendors;PAGES=r.result.pages||{};ITEMS=[];
+ const tot={OK:0,OK_IMG:0,DIFF:0,REVIEW:0,NOPAIR:0};R.forEach(v=>{for(const k in tot)tot[k]+=v.count[k]});
  let h=`<div class="chips" id="sum">${chips(tot)}</div><div id="todo" style="margin:4px 0;color:var(--sub)"></div>`;
- for(const v of r.result){
+ for(const v of R){
   h+=`<div class="vendor"><h2>${esc(v.vendor)}</h2><div class="chips">${chips(v.count)}</div>`;
   v.warnings.forEach(w=>h+=`<div class="warn">⚠ ${esc(w)}</div>`);
   for(const p of v.pairs){
@@ -107,7 +128,7 @@ async function showResult(){
    const order={DIFF:0,REVIEW:1,OK_IMG:2,OK:3};
    const rows=p.rows.slice().sort((a,b)=>order[a.status]-order[b.status]);
    const okr=rows.filter(r=>r.status==='OK');
-   rows.filter(r=>r.status!=='OK').forEach(r=>h+=rowHtml(r));
+   rows.filter(r=>r.status!=='OK').forEach(r=>{ITEMS.push({row:r,vendor:v.vendor,pair:`見積「${p.q}」⇔発注「${p.o}」`,done:false});h+=rowHtml(r,ITEMS.length-1)});
    if(okr.length)h+=`<details><summary>✅ 確実に一致した行 (${okr.length}行)</summary>${okr.map(r=>`<div class="row OK">${esc(r.model)}</div>`).join('')}</details>`;
    h+=`</div>`;
   }
@@ -116,12 +137,39 @@ async function showResult(){
  $('out').innerHTML=h;$('save').style.display='';todo();
 }
 function chips(c){return `<span class="chip c-ok">✅ 確実に一致 <b>${c.OK}</b></span><span class="chip c-img">☑ 画像で一致(目で確認) <b>${c.OK_IMG}</b></span><span class="chip c-ng">❌ 違い <b>${c.DIFF}</b></span><span class="chip c-rv">⚠ 要確認 <b>${c.REVIEW}</b></span><span class="chip c-np">相手なし <b>${c.NOPAIR}</b>組</span>`}
-function rowHtml(r){
+function rowHtml(r,idx){
  const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',OK_IMG:'☑ 画像で一致'}[r.status];
  const side=(lab,img,raw)=>`<div><small>${lab}</small>${img?`<img src="data:image/png;base64,${img}">`:(raw?`<div class="raw">${esc(raw)}</div>`:'<small>(なし)</small>')}</div>`;
- return `<div class="row ${r.status}"><label class="chk"><input type="checkbox" onchange="this.closest('.row').classList.toggle('done',this.checked);todo()"> 確認した</label><span class="mdl">${mark} ${esc(r.model)}</span>${r.msg?`<div class="msg">${esc(r.msg)}</div>`:''}<div class="two">${side('見積',r.qimg,r.qraw)}${side('発注',r.oimg,r.oraw)}</div></div>`;
+ return `<div class="row ${r.status}" id="row${idx}"><label class="chk"><input type="checkbox" id="chk${idx}" onchange="setDone(${idx},this.checked)"> 確認した</label><span class="mdl">${mark} ${esc(r.model)}</span> <button class="sm" onclick="openV(${idx})">書類全体で見る(赤枠)</button>${r.msg?`<div class="msg">${esc(r.msg)}</div>`:''}<div class="two">${side('見積',r.qimg,r.qraw)}${side('発注',r.oimg,r.oraw)}</div></div>`;
 }
-function todo(){const a=document.querySelectorAll('.row:not(.OK) .chk input'),n=[...a].filter(x=>!x.checked).length;const e=$('todo');if(e)e.textContent=a.length?`確認が必要な行: ${a.length}行のうち、未確認 ${n}行`:'確認が必要な行はありません'}
+function setDone(i,v){ITEMS[i].done=v;const c=$('chk'+i);if(c)c.checked=v;const r=$('row'+i);if(r)r.classList.toggle('done',v);if(CUR===i)$('vchk').checked=v;todo()}
+/* ---- 確認ビュー: 書類全体に赤枠で位置を示し、要確認を順番に見る ---- */
+function pane(el,pid,box,raw,status){
+ el.innerHTML='';
+ if(pid&&PAGES[pid]){
+  const w=document.createElement('div');w.className='pgin';const im=document.createElement('img');im.src=PAGES[pid];
+  w.appendChild(im);el.appendChild(w);
+  if(box){const b=document.createElement('i');b.className='bx '+status;b.style.left=(100*box[0])+'%';b.style.top=(100*box[1])+'%';b.style.width=(100*(box[2]-box[0]))+'%';b.style.height=(100*(box[3]-box[1]))+'%';w.appendChild(b);
+   const go=()=>{el.scrollTop=Math.max(0,box[1]*im.clientHeight-el.clientHeight/3)};im.onload=go;if(im.complete)go();}
+ }else el.innerHTML=raw?`<div class="raw" style="padding:10px">${esc(raw)}<br><small>(この書類は画像が無いので、読み取った文字を出しています)</small></div>`:'<div style="padding:10px;color:#667385">(この書類に、対応する行はありません)</div>';
+}
+function showV(i){
+ if(i<0||i>=ITEMS.length)return;CUR=i;const it=ITEMS[i],r=it.row;
+ const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',OK_IMG:'☑ 画像で一致'}[r.status];
+ $('vcnt').textContent=`${i+1} / ${ITEMS.length}`;$('vtitle').textContent=`${it.vendor} ・ ${it.pair}`;
+ $('vmsg').innerHTML=`<b>${mark} ${esc(r.model)}</b>${r.msg?' — '+esc(r.msg):''}`;
+ pane($('vq'),r.qpage,r.qbox,r.qraw,r.status);pane($('vo'),r.opage,r.obox,r.oraw,r.status);
+ $('vchk').checked=it.done;$('vprev').disabled=i===0;$('vnext').disabled=i===ITEMS.length-1;
+}
+function openV(i){$('vw').hidden=false;showV(i)}
+function nextUndone(from){for(let k=1;k<=ITEMS.length;k++){const j=(from+k)%ITEMS.length;if(!ITEMS[j].done)return j}return -1}
+$('vx').onclick=()=>{$('vw').hidden=true;const r=$('row'+CUR);if(r)r.scrollIntoView({block:'center'})};
+$('vprev').onclick=()=>showV(CUR-1);$('vnext').onclick=()=>showV(CUR+1);
+$('vchk').onchange=e=>setDone(CUR,e.target.checked);
+$('vok').onclick=()=>{setDone(CUR,true);const j=nextUndone(CUR);if(j<0){alert('確認が必要な行は、全部、確認しました');$('vw').hidden=true}else showV(j)};
+document.addEventListener('keydown',e=>{if($('vw').hidden)return;if(e.key==='ArrowRight')showV(CUR+1);else if(e.key==='ArrowLeft')showV(CUR-1);else if(e.key==='Enter'){e.preventDefault();$('vok').click()}else if(e.key==='Escape')$('vx').click()});
+function todo(){const n=ITEMS.filter(x=>!x.done).length,e=$('todo');if(!e)return;
+ e.innerHTML=ITEMS.length?`確認が必要な行: ${ITEMS.length}行のうち、未確認 ${n}行 <button class="sm pri" onclick="const j=nextUndone(-1);if(j>=0)openV(j)" ${n?'':'disabled'}>確認を始める(書類全体に赤枠・順番に)</button>`:'確認が必要な行はありません'}
 $('save').onclick=()=>{const css=document.querySelector('style').textContent;const html=`<!doctype html><meta charset="utf-8"><title>照合結果</title><style>${css}</style><body><main>${$('out').innerHTML}</main>`;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([html],{type:'text/html'}));a.download='照合結果_'+new Date().toISOString().slice(0,16).replace(/[:T]/g,'')+'.html';a.click()};
 refresh().then(()=>{if(ST.job.status==='running')poll()});
 </script></body></html>

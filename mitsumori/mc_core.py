@@ -264,6 +264,26 @@ def ocr_rapid(img):
     return segs
 
 
+_EASY = None
+_EASY_LOCK = threading.Lock()
+
+
+def ocr_easy(img):
+    """EasyOCR(重い・ニューラルネットの読み取り)。モデルは初回に読み込む"""
+    global _EASY
+    import numpy as np, easyocr
+    with _EASY_LOCK:
+        if _EASY is None:
+            _EASY = easyocr.Reader(["ja", "en"], gpu=False, verbose=False)
+        res = _EASY.readtext(np.array(img.convert("RGB")), paragraph=False)
+    segs = []
+    for box, text, conf in res:
+        xs = [p[0] for p in box]; ys = [p[1] for p in box]
+        s = seg_from_box(text, min(xs), min(ys), max(xs), max(ys)); s.conf = float(conf)
+        segs.append(s)
+    return segs
+
+
 def otsu_bw(img):
     """白黒にする(大津の方法)。Tesseractはこの前処理でかなり正確になる"""
     import numpy as np
@@ -581,9 +601,9 @@ def compare(q, o):
             res.append({"status": "DIFF" if sure else "REVIEW", "model": one["model_raw"], "msg": note + ("" if sure else "(読み取りが確実でないので、断定しない)"), "qrow": a, "orow": b})
     for d, nm in ((q, "見積"), (o, "発注")):
         if not d.rows:
-            res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}書から明細行を1行も読めなかった: " + " / ".join(d.notes or ["原因不明"]), "qrow": None, "orow": None})
+            res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}書から明細行を1行も読めなかった: " + " / ".join(d.notes or ["原因不明"]), "qrow": None, "orow": None, "doc": "q" if nm == "見積" else "o"})
         elif d.notes:
-            res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}書: " + " / ".join(d.notes), "qrow": None, "orow": None})
+            res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}書: " + " / ".join(d.notes), "qrow": None, "orow": None, "doc": "q" if nm == "見積" else "o"})
     return res, [JP[k] for k in ["model", "qty"] + both], skipped
 
 
@@ -599,6 +619,27 @@ def crop_b64(doc, row):
         return base64.b64encode(b.getvalue()).decode()
     except Exception:
         return None
+
+
+def row_box(doc, row):
+    """行の位置を、ページ画像に対する割合(0〜1)で返す。Excelなど、画像の無い書類は None"""
+    try:
+        if not doc.pages or "y0" not in row: return None
+        im, sc = doc.pages[row.get("page", 0)]
+        f = sc if doc.kind == "文字入りPDF" else 1.0
+        x0, y0, x1, y1 = (row["x0"] - 6) * f, (row["y0"] - 4) * f, (row["x1"] + 6) * f, (row["y1"] + 4) * f
+        return [max(0, x0 / im.width), max(0, y0 / im.height), min(1, x1 / im.width), min(1, y1 / im.height)]
+    except Exception:
+        return None
+
+
+def page_jpeg_b64(doc, pno, maxw=1000):
+    """ページ全体の画像(JPEG・幅を縮める)。画面に出す用"""
+    im, _ = doc.pages[pno]
+    if im.width > maxw:
+        im = im.resize((maxw, int(im.height * maxw / im.width)), Image.LANCZOS)
+    b = io.BytesIO(); im.convert("RGB").save(b, "JPEG", quality=72)
+    return base64.b64encode(b.getvalue()).decode()
 
 
 # ------------------------------------------------------------------ 1社ぶん・全社ぶん
