@@ -74,7 +74,8 @@ button.sm.pri{background:var(--pri);color:#fff}
 const $=id=>document.getElementById(id), ROLES=['見積','発注'];
 let ST=null, timer=null, PAGES={}, ITEMS=[], CUR=-1;
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-async function api(path,opt){const r=await fetch(path,opt);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j}
+const TK=new URLSearchParams(location.search).get('t')||'';
+async function api(path,opt){opt=Object.assign({},opt);opt.headers=Object.assign({'X-MC-Token':TK},opt.headers||{});const r=await fetch(path,opt);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j}
 async function refresh(){ST=await api('/api/state');render()}
 function render(){
  $('ver').textContent=ST.version;

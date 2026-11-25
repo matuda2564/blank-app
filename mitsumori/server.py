@@ -3,7 +3,7 @@
 ・127.0.0.1(自分のパソコンだけ)で待ち受ける。外のネットには何も送らない。
 ・書類は作業フォルダに置き、リセットで全部消す。過去の書類を覚えない。
 """
-import os, sys, json, re, shutil, threading, time, base64, io, urllib.parse, tempfile
+import os, sys, json, re, shutil, threading, time, base64, io, urllib.parse, tempfile, secrets
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 HERE = os.path.dirname(os.path.abspath(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))))
@@ -11,6 +11,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mc_core as C
 
 VERSION = "v1"
+TOKEN = secrets.token_urlsafe(18)   # 起動ごとに変わる合言葉。これを持たない要求は断る(他のサイトからの勝手な操作を防ぐ)
+PORT = {"n": 0}
 WORK = os.environ.get("MC_WORK") or os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "見積照合_作業フォルダ")
 NSLOT = 4
 ROLES = ("見積", "発注")
@@ -109,6 +111,20 @@ def run_job():
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
+    def _guard(self, page):
+        """守りの検査。①宛先(Host)が自分のパソコン向けか(DNSリバインディング対策) ②他のサイトから来た要求(Origin)でないか ③合言葉があるか"""
+        host = (self.headers.get("Host") or "").lower()
+        if host not in (f"127.0.0.1:{PORT['n']}", f"localhost:{PORT['n']}"):
+            self._send(403, {"error": "宛先が違います"}); return False
+        org = self.headers.get("Origin")
+        if org and org not in (f"http://127.0.0.1:{PORT['n']}", f"http://localhost:{PORT['n']}"):
+            self._send(403, {"error": "他のサイトからの操作は受け付けません"}); return False
+        u = urllib.parse.urlparse(self.path)
+        tok = self.headers.get("X-MC-Token") or dict(urllib.parse.parse_qsl(u.query)).get("t")
+        if not tok or not secrets.compare_digest(tok, TOKEN):
+            self._send(403, {"error": "合言葉がありません。アプリから開き直してください"}); return False
+        return True
+
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
         if isinstance(body, (dict, list)): body = json.dumps(body, ensure_ascii=False)
         if isinstance(body, str): body = body.encode("utf-8")
@@ -116,6 +132,7 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body)
 
     def do_GET(self):
+        if not self._guard(True): return
         u = urllib.parse.urlparse(self.path)
         if u.path in ("/", "/index.html"):
             p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
@@ -126,6 +143,7 @@ class H(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if not self._guard(False): return
         u = urllib.parse.urlparse(self.path); q = dict(urllib.parse.parse_qsl(u.query))
         n = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(n) if n else b""
@@ -170,13 +188,18 @@ def start(port=0):
     os.makedirs(WORK, exist_ok=True)
     shutil.rmtree(WORK, ignore_errors=True); os.makedirs(WORK, exist_ok=True)   # 起動時にも前回の書類は消す(覚えない)
     srv = ThreadingHTTPServer(("127.0.0.1", port), H)
+    PORT["n"] = srv.server_address[1]
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv, srv.server_address[1]
 
 
+def url(port):
+    return f"http://127.0.0.1:{port}/?t={TOKEN}"
+
+
 if __name__ == "__main__":
     srv, port = start(int(sys.argv[1]) if len(sys.argv) > 1 else 8780)
-    print(f"http://127.0.0.1:{port}  作業フォルダ: {WORK}", flush=True)
+    print(f"{url(port)}  作業フォルダ: {WORK}", flush=True)
     try:
         while True: time.sleep(3600)
     except KeyboardInterrupt:

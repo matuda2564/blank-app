@@ -48,6 +48,7 @@ HDR = {
     "due": ("納期",),
 }
 CORE = ["model", "qty", "price", "amount"]
+VARIANT = {"单": "単", "价": "価", "俩": "価", "额": "額", "额": "額", "数": "数", "号": "号", "纳": "納", "规": "規", "称": "称", "名": "名"}
 JP = {"model": "型式", "name": "品名", "qty": "数量", "unit": "単位", "price": "単価", "amount": "金額", "due": "納期"}
 
 
@@ -108,7 +109,7 @@ def _has_any(nt, words):
 
 def find_header(lines):
     for i, l in enumerate(lines):
-        t = norm(l["text"])
+        t = "".join(VARIANT.get(ch, ch) for ch in norm(l["text"]))
         if "数量" in t and (_has_any(t, HDR["model"]) or _has_any(t, HDR["name"])):
             return i
     return None
@@ -121,8 +122,9 @@ def header_cols(line):
     found, unk = {}, []
     for t, a, b in tks:
         nt = norm(t); lab = None
+        nt = "".join(VARIANT.get(ch, ch) for ch in nt)       # OCRが中国語の字体で読んだ見出し(单位・金额…)を、日本語の字体にそろえる
         for key in HDR:
-            if key not in found and _has_any(nt, HDR[key]):
+            if key not in found and (_has_any(nt, HDR[key]) or any(w.startswith(nt) for w in HDR[key] if 1 <= len(nt) < len(w) and len(nt) <= 2)):
                 lab = key; break
         if lab: found[lab] = (a, b)
         else: unk.append((a, b))
@@ -200,7 +202,13 @@ def parse_rows(lines):
 
 
 def _finish_rows(rows, total):
-    """単価・金額の列が1つも読めない/合計が合わない書類は、全行を『確実』にしない"""
+    """単価・金額の列が1つも読めない/合計が合わない書類は、全行を『確実』にしない。
+    品名・単位・納期は、他の行に書いてあるのに、この行だけ空なら、読み落とし(要確認)"""
+    for k in ("name", "unit", "due"):
+        if any(r.get(k) for r in rows):
+            for r in rows:
+                if not r.get(k) and r.get(k) is not None:
+                    r["problems"].append(f"{JP[k]}が読めていない(他の行には書いてある)")
     if rows and all(r["price"] is None and r["amount"] is None for r in rows):
         for r in rows: r["problems"].append("単価・金額の列を読めていない(比べられない)")
     if total is not None and rows and all(r["amount"] is not None for r in rows):
