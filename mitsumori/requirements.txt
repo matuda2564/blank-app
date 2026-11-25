@@ -1,0 +1,6 @@
+pymupdf
+openpyxl
+pillow
+numpy
+rapidocr-onnxruntime
+pywebview
