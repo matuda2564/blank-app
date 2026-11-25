@@ -62,7 +62,7 @@ def selftest(outpath):
 def main():
     import server
     srv, port = server.start(0)
-    url = f"http://127.0.0.1:{port}/"
+    url = server.url(port)
     try:
         import webview
         webview.create_window("見積・発注 照合", url, width=1280, height=860)
