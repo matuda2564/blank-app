@@ -121,11 +121,11 @@ def header_cols(line):
     tks = tokens_of(line)
     found, unk = {}, []
     for t, a, b in tks:
-        nt = norm(t); lab = None
-        nt = "".join(VARIANT.get(ch, ch) for ch in nt)       # OCRが中国語の字体で読んだ見出し(单位・金额…)を、日本語の字体にそろえる
-        for key in HDR:
-            if key not in found and (_has_any(nt, HDR[key]) or any(w.startswith(nt) for w in HDR[key] if 1 <= len(nt) < len(w) and len(nt) <= 2)):
-                lab = key; break
+        nt = "".join(VARIANT.get(ch, ch) for ch in norm(t))   # OCRが中国語の字体で読んだ見出し(单位・金额…)を日本語の字体にそろえる
+        exact = [k for k in HDR if k not in found and _has_any(nt, HDR[k])]
+        part = [k for k in HDR if k not in found and 1 <= len(nt) <= 2 and any(w.startswith(nt) and len(nt) < len(w) for w in HDR[k])]
+        # ちょうど当てはまるものがあればそれ。なければ、一部だけ読めた見出しが、ただ1つの見出しに当てはまるときだけ。あいまいなら決めない
+        lab = exact[0] if exact else (part[0] if len(part) == 1 else None)
         if lab: found[lab] = (a, b)
         else: unk.append((a, b))
     guessed = []
@@ -203,12 +203,13 @@ def parse_rows(lines):
 
 def _finish_rows(rows, total):
     """単価・金額の列が1つも読めない/合計が合わない書類は、全行を『確実』にしない。
-    品名・単位・納期は、他の行に書いてあるのに、この行だけ空なら、読み落とし(要確認)"""
+    品名・単位・納期は、他の行に書いてあるのに、この行だけ空なら、『目で確認』の注意を付ける(soft)"""
+    for r in rows: r.setdefault("soft", [])
     for k in ("name", "unit", "due"):
         if any(r.get(k) for r in rows):
             for r in rows:
                 if not r.get(k) and r.get(k) is not None:
-                    r["problems"].append(f"{JP[k]}が読めていない(他の行には書いてある)")
+                    r["soft"].append(f"{JP[k]}が読めていない(他の行には書いてある)")
     if rows and all(r["price"] is None and r["amount"] is None for r in rows):
         for r in rows: r["problems"].append("単価・金額の列を読めていない(比べられない)")
     if total is not None and rows and all(r["amount"] is not None for r in rows):
@@ -347,15 +348,24 @@ def ocr_tess(img):
 
 
 COMPARE_KEYS = ("model", "name", "qty", "unit", "price", "amount", "due")
+SOFT_KEYS = ("name", "unit", "due")
 
 
 def merge_readers(readers):
-    """複数の読み取り結果(各 rows のリスト)を行ごとに突き合わせる。全員が一致した行だけ確実。
-    readers[0] を基準にする。"""
+    """複数の読み取り結果(各 rows のリスト)を行ごとに突き合わせる。readers[0] を基準にする。
+    確実(exact)にする条件(松田決裁 2026-11-25):
+      ①基準の読み取りに、数字の問題が無い(数量×単価=金額が合う等)
+      ②他の読み取りのうち少なくとも1つが、型式と数量で一致し、単価・金額が食い違わない
+      ※ 検算(数量×単価=金額)ができない行は、単価・金額も一致が必要
+      ※ 品名・単位・納期は、読み取りが食い違っても確実さを下げない。代わりに『目で確認』の注意(soft)を付ける
+    """
     base = readers[0]; out = []
     used = [set() for _ in readers]
     for a in base:
-        ya = (a["y0"] + a["y1"]) / 2; unsure = []
+        a.setdefault("soft", [])
+        ya = (a["y0"] + a["y1"]) / 2
+        validated = a["qty"] is not None and a["price"] is not None and a["amount"] is not None   # 検算できた行(問題が無ければ、数字は一貫している)
+        agree, conflict, others = False, [], []
         for ri in range(1, len(readers)):
             best = None
             for j, b in enumerate(readers[ri]):
@@ -364,19 +374,29 @@ def merge_readers(readers):
                 if abs(ya - yb) < 0.7 * max(a["y1"] - a["y0"], 8) and (best is None or abs(ya - yb) < best[0]):
                     best = (abs(ya - yb), j)
             if best is None:
-                unsure.append(f"読み取り{ri+1}では、この行が見つからない"); continue
+                others.append(f"読み取り{ri+1}では、この行が見つからない"); continue
             used[ri].add(best[1]); b = readers[ri][best[1]]
-            diff = [k for k in COMPARE_KEYS if a.get(k) != b.get(k)]
-            if diff:
-                unsure.append(f"読み取り{ri+1}と食い違う({'・'.join(JP[k] for k in diff)}): 1={a['model_raw']}/{a['qty']}/{a['price']}  {ri+1}={b['model_raw']}/{b['qty']}/{b['price']}")
-            if b["problems"]: unsure.append(f"読み取り{ri+1}: " + " / ".join(b["problems"]))
-        a["exact"] = not unsure and not a["problems"]
+            if a["model"] == b["model"] and a["qty"] == b["qty"]:
+                numconf = [k for k in ("price", "amount") if a[k] is not None and b[k] is not None and a[k] != b[k]]
+                need_full = not validated
+                full_diff = [k for k in ("price", "amount") if a[k] != b[k]] if need_full else []
+                if numconf: conflict.append(f"読み取り{ri+1}と{'・'.join(JP[k] for k in numconf)}が食い違う")
+                elif full_diff: conflict.append(f"検算できない行で、読み取り{ri+1}と{'・'.join(JP[k] for k in full_diff)}が一致しない")
+                else: agree = True
+            else:
+                diff = [JP[k] for k in ("model", "qty") if a[k] != b[k]]
+                others.append(f"読み取り{ri+1}と食い違う({'・'.join(diff)}): 1={a['model_raw']}/{a['qty']}  {ri+1}={b['model_raw']}/{b['qty']}")
+            sd = [JP[k] for k in SOFT_KEYS if a.get(k) != b.get(k)]
+            if sd: a["soft"].append(f"読み取り{ri+1}と{'・'.join(sd)}が食い違う")
+        unsure = list(conflict)
+        if not agree: unsure += others or ["他の読み取りと一致しない"]
+        a["exact"] = agree and not conflict and not a["problems"]
         a["problems"] = a["problems"] + unsure; a["src"] = "ocr"
         out.append(a)
     for ri in range(1, len(readers)):
         for j, b in enumerate(readers[ri]):
             if j not in used[ri]:
-                b["exact"] = False; b["src"] = "ocr"; b["problems"].append("基準の読み取りでは、この行が見つからない"); out.append(b)
+                b.setdefault("soft", []); b["exact"] = False; b["src"] = "ocr"; b["problems"].append("基準の読み取りでは、この行が見つからない"); out.append(b)
     return out
 
 
@@ -429,17 +449,19 @@ def scan_ocr(d, im, pno, extra):
     la, lb = group_lines(sa), group_lines(sb)
     d.text += " ".join(l["text"] for l in la) + "\n"
     ra, ta, ea = parse_rows(la); rb, tb, eb = parse_rows(lb)
-    if ea or eb:
-        d.notes.append(f"{pno+1}ページ: 見出しを読めない({ea or '○'}/{eb or '○'})")
+    if ea:   # 基準の読み取りが見出しを読めないときだけ、書類全体の注意にする(2つ目だけ読めない場合は、行の一致で扱う)
+        d.notes.append(f"{pno+1}ページ: 見出しを読めない({ea})")
     readers = [ra, rb] + ([extra] if extra else [])
     rows = merge_readers([x for x in readers if x] or [ra])
-    tot = ta if ta is not None and ta == tb else None
-    if (ta is None) != (tb is None) or (ta is not None and ta != tb):
-        d.notes.append(f"{pno+1}ページ: 合計の読み取りが一致しない/読めない({ta}/{tb})")
+    # 合計: 基準の読み取り(RapidOCR)の合計が、明細の金額の合計と合えば、それ自体が強い検算。2つ目が読めなくても問題にしない。
+    # 合わなければ、読み落としか読み間違いなので、全行を確実にしない。基準が合計を読めなかったときは、検算できないと注意する。
+    tot = ta
     for r in rows: r["page"] = pno; r["src"] = "ocr"
-    if tot is not None and rows and all(r["amount"] is not None for r in rows) and sum(r["amount"] for r in rows) != tot:
+    if ta is None:
+        d.notes.append(f"{pno+1}ページ: 合計を読めなかった(合計の検算ができない)")
+    elif ra and all(r["amount"] is not None for r in ra) and sum(r["amount"] for r in ra) != ta:
         for r in rows:
-            r["exact"] = False; r["problems"].append(f"明細の金額の合計と書類の合計{tot:,}が合わない(読み落としの可能性)")
+            r["exact"] = False; r["problems"].append(f"明細の金額の合計{sum(x['amount'] for x in ra):,}と書類の合計{ta:,}が合わない(読み落としの可能性)")
     d.rows += rows
     d.total = tot
 
@@ -581,16 +603,21 @@ def compare(q, o):
             continue
         a = qmap.get(m, [None])[0]; b = omap.get(m, [None])[0]
         if a and b:
-            diffs = []
+            diffs, softdiffs = [], []
             for k in ("qty", "price", "amount", "name", "unit", "due"):
                 if k != "qty" and k not in both: continue
                 va, vb = a.get(k), b.get(k)
                 if va != vb:
                     fm = (lambda v: f"{v:,}" if isinstance(v, (int, float)) and k in ("qty", "price", "amount") else str(v))
-                    diffs.append(f"{JP[k]}: 見積「{fm(va)}」⇔ 発注「{fm(vb)}」")
+                    (softdiffs if k in SOFT_KEYS else diffs).append(f"{JP[k]}: 見積「{fm(va)}」⇔ 発注「{fm(vb)}」")
             probs = a["problems"] + b["problems"]
             sure = a["exact"] and b["exact"]
             ocr = a.get("src") == "ocr" or b.get("src") == "ocr"
+            notes = [n for n in a.get("soft", []) + b.get("soft", [])]
+            if softdiffs and ocr:   # 画像から読んだ品名・単位・納期の違いは、読み取りの誤りかもしれない → 要確認
+                res.append({"status": "REVIEW", "model": a["model_raw"], "msg": "違いに見えるが、画像の読み取りが確実でない: " + " / ".join(diffs + softdiffs), "qrow": a, "orow": b})
+                continue
+            diffs = diffs + softdiffs
             if diffs and sure:
                 res.append({"status": "DIFF", "model": a["model_raw"], "msg": " / ".join(diffs), "qrow": a, "orow": b})
             elif diffs:
@@ -598,7 +625,8 @@ def compare(q, o):
             elif probs or not sure:
                 res.append({"status": "REVIEW", "model": a["model_raw"], "msg": "読み取りに自信がない: " + " / ".join(dict.fromkeys(probs or ["読み取りが確実でない"])), "qrow": a, "orow": b})
             else:
-                res.append({"status": "OK_IMG" if ocr else "OK", "model": a["model_raw"], "msg": "", "qrow": a, "orow": b})
+                msg = ("品名・単位・納期は、読み取りに自信がないので、画像を見て確認してください(" + " / ".join(dict.fromkeys(notes)) + ")") if (ocr and notes) else ""
+                res.append({"status": "OK_IMG" if ocr else "OK", "model": a["model_raw"], "msg": msg, "qrow": a, "orow": b})
         else:
             side = "見積にだけある" if a else "発注にだけある"
             one = a or b
