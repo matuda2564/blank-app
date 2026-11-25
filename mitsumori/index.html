@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>見積・発注 照合</title>
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--ink:#1d2733;--sub:#667385;--line:#d9dfe7;--ok:#1f9d57;--okbg:#dff3e7;--img:#2f6fd6;--imgbg:#e3edfc;--ng:#d64545;--ngbg:#fde4e4;--rv:#c98a00;--rvbg:#fff3c9;--pri:#1b3a5c}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:'Noto Sans CJK JP','Noto Sans JP','Yu Gothic UI','Meiryo',sans-serif;font-size:16px}
+header{background:var(--pri);color:#fff;padding:12px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+header h1{font-size:20px;margin:0}header small{opacity:.8}
+main{max-width:1280px;margin:0 auto;padding:16px}
+.note{background:#eef4fb;border:1px solid #c9dbf2;border-radius:8px;padding:10px 14px;font-size:14px;line-height:1.7}
+.slots{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin:14px 0}
+.slot{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.slot input.nm{font:inherit;font-weight:700;border:1px solid var(--line);border-radius:6px;padding:4px 8px;width:100%;margin-bottom:8px}
+.dz{border:2px dashed #9fb0c6;border-radius:8px;padding:10px;margin:6px 0;background:#fafcff;cursor:pointer;min-height:84px}
+.dz.over{background:#e6f0ff;border-color:var(--img)}
+.dz b{display:block;margin-bottom:4px}.dz .hint{color:var(--sub);font-size:13px}
+.files{margin-top:6px;font-size:13px;max-height:120px;overflow:auto}
+.files div{display:flex;justify-content:space-between;gap:6px;padding:1px 0}.files button{border:0;background:none;color:var(--ng);cursor:pointer;font-size:14px}
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}
+button.big{font:inherit;font-size:18px;font-weight:700;padding:12px 28px;border-radius:10px;border:0;cursor:pointer}
+button.go{background:var(--pri);color:#fff}button.go:disabled{background:#9aa7b6;cursor:default}
+button.rst{background:#fff;color:var(--ng);border:2px solid var(--ng)}button.sv{background:#fff;color:var(--pri);border:2px solid var(--pri);font-size:15px;padding:8px 16px}
+.prog{flex:1;min-width:200px}.prog .t{height:12px;background:#dfe5ee;border-radius:6px;overflow:hidden}.prog .t i{display:block;height:100%;background:var(--img);width:0}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.chip{padding:6px 12px;border-radius:8px;font-size:15px}
+.c-ok{background:var(--okbg)}.c-img{background:var(--imgbg)}.c-ng{background:var(--ngbg)}.c-rv{background:var(--rvbg)}.c-np{background:#e6e8ec}
+.vendor{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:14px 0}.vendor h2{margin:4px 0 6px;font-size:19px}
+.pair{border-top:1px solid var(--line);padding:8px 0}.pair .tt{font-weight:700}.pair .meta{color:var(--sub);font-size:13px}
+.row{border-left:6px solid var(--line);padding:6px 10px;margin:6px 0;border-radius:4px}
+.row.DIFF{border-color:var(--ng);background:#fff7f7}.row.REVIEW{border-color:var(--rv);background:#fffbea}.row.OK_IMG{border-color:var(--img);background:#f5f9ff}.row.OK{border-color:var(--ok)}
+.row .mdl{font-weight:700}.row .msg{font-size:14px;margin:2px 0}
+.two{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}.two>div{flex:1;min-width:260px}.two small{color:var(--sub);display:block}
+.two img{max-width:100%;border:1px solid #bcc6d4;border-radius:4px;background:#fff}.raw{font-family:monospace;font-size:12px;background:#f1f3f6;padding:3px 6px;border-radius:4px}
+label.chk{float:right;font-size:14px;cursor:pointer}.done{opacity:.45}
+details summary{cursor:pointer;color:var(--sub);margin:4px 0}
+.warn{background:var(--rvbg);border-radius:6px;padding:6px 10px;margin:6px 0}.err{background:var(--ngbg);border-radius:6px;padding:8px 12px}
+@media print{header,.slots,.bar,.note{display:none}}
+</style></head><body>
+<header><h1>見積・発注 照合</h1><small id="ver"></small><small>書類はこのパソコンの中だけで処理します(外には送りません)</small></header>
+<main>
+<div class="note">
+<b>使い方</b>: ①社ごとの枠に、<b>見積書</b>と<b>発注書</b>を入れる(ドラッグ、またはクリックして選ぶ。PDF・Excel・画像) → ②<b>「照合する」</b> → ③結果を上から確認 → ④終わったら<b>「全部リセット」</b>。<br>
+<b>✅ 確実に一致</b>=文字入りPDF・Excelで全項目が一致 / <b>☑ 画像で一致</b>=画像を2種類の読み取りで確認。<b>似た文字(0とO、1とI)の読み違いは完全には防げない</b>ので、画像を見て確認してください / <b>❌ 違い</b> / <b>⚠ 要確認</b>=読み取れない・自信がない。<b>✅以外は、必ず人が見てください。</b>
+</div>
+<div class="slots" id="slots"></div>
+<div class="bar">
+<button class="big go" id="go">照合する</button>
+<button class="big rst" id="reset">全部リセット</button>
+<div class="prog"><div class="t"><i id="pb"></i></div><div id="pt" style="font-size:13px;color:var(--sub)"></div></div>
+<button class="big sv" id="save" style="display:none">結果をHTMLで保存</button>
+</div>
+<div id="out"></div>
+</main>
+<script>
+const $=id=>document.getElementById(id), ROLES=['見積','発注'];
+let ST=null, timer=null;
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(path,opt){const r=await fetch(path,opt);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j}
+async function refresh(){ST=await api('/api/state');render()}
+function render(){
+ $('ver').textContent=ST.version;
+ const j=ST.job,running=j.status==='running';
+ let h='';
+ for(const s of ST.slots){
+  h+=`<div class="slot"><input class="nm" value="${esc(s.name)}" onchange="rename(${s.id},this.value)" ${running?'disabled':''}>`;
+  for(const r of ROLES){
+   h+=`<div class="dz" data-slot="${s.id}" data-role="${r}"><b>${r}書 (${s[r].length}枚)</b><span class="hint">ここにドラッグ、またはクリックして選ぶ</span>
+   <div class="files">${s[r].map(f=>`<div><span>${esc(f)}</span><button title="外す" onclick="event.stopPropagation();rm(${s.id},'${r}',decodeURIComponent('${encodeURIComponent(f)}'))">✕</button></div>`).join('')}</div></div>`;
+  }
+  h+=`</div>`;
+ }
+ $('slots').innerHTML=h;
+ document.querySelectorAll('.dz').forEach(z=>{
+  z.onclick=()=>{if(running)return;const i=document.createElement('input');i.type='file';i.multiple=true;i.style.display='none';i.accept='.pdf,.xlsx,.xlsm,.png,.jpg,.jpeg,.tif,.tiff,.bmp';document.body.appendChild(i);i.onchange=()=>{up(z.dataset.slot,z.dataset.role,[...i.files]).then(()=>i.remove())};i.click()};
+  z.ondragover=e=>{e.preventDefault();z.classList.add('over')};z.ondragleave=()=>z.classList.remove('over');
+  z.ondrop=e=>{e.preventDefault();z.classList.remove('over');if(!running)up(z.dataset.slot,z.dataset.role,e.dataTransfer.files)};
+ });
+ const has=ST.slots.some(s=>s['見積'].length&&s['発注'].length);
+ $('go').disabled=running||!has; $('reset').disabled=running;
+ const pct=j.total?Math.round(100*j.done/j.total):0;
+ $('pb').style.width=(running?pct:(j.status==='done'?100:0))+'%';
+ $('pt').textContent=running?`読み取り中… ${j.done}/${j.total}枚 (${j.sec}秒)`:(j.status==='done'?`完了(${j.sec}秒)`:(j.status==='error'?'失敗':''));
+}
+async function up(slot,role,files){
+ for(const f of files){
+  try{await api(`/api/upload?slot=${slot}&role=${encodeURIComponent(role)}&name=${encodeURIComponent(f.name)}`,{method:'POST',body:f})}catch(e){alert(f.name+': '+e.message)}
+ }
+ $('out').innerHTML='';$('save').style.display='none';await refresh();
+}
+async function rm(slot,role,name){await api(`/api/remove?slot=${slot}&role=${encodeURIComponent(role)}&name=${encodeURIComponent(name)}`,{method:'POST'});$('out').innerHTML='';$('save').style.display='none';refresh()}
+async function rename(slot,name){await api(`/api/name?slot=${slot}&name=${encodeURIComponent(name)}`,{method:'POST'})}
+$('go').onclick=async()=>{try{await api('/api/run',{method:'POST'});$('out').innerHTML='';$('save').style.display='none';poll()}catch(e){alert(e.message)}};
+$('reset').onclick=async()=>{if(!confirm('書類も結果も、全部消します。よろしいですか?'))return;await api('/api/reset',{method:'POST'});$('out').innerHTML='';$('save').style.display='none';refresh()};
+function poll(){clearInterval(timer);timer=setInterval(async()=>{await refresh();if(ST.job.status!=='running'){clearInterval(timer);showResult()}},800);refresh()}
+async function showResult(){
+ const r=await api('/api/result');
+ if(r.status==='error'){$('out').innerHTML=`<div class="err">照合に失敗しました: ${esc(r.msg)}</div>`;return}
+ if(r.status!=='done')return;
+ const tot={OK:0,OK_IMG:0,DIFF:0,REVIEW:0,NOPAIR:0};r.result.forEach(v=>{for(const k in tot)tot[k]+=v.count[k]});
+ let h=`<div class="chips" id="sum">${chips(tot)}</div><div id="todo" style="margin:4px 0;color:var(--sub)"></div>`;
+ for(const v of r.result){
+  h+=`<div class="vendor"><h2>${esc(v.vendor)}</h2><div class="chips">${chips(v.count)}</div>`;
+  v.warnings.forEach(w=>h+=`<div class="warn">⚠ ${esc(w)}</div>`);
+  for(const p of v.pairs){
+   h+=`<div class="pair"><div class="tt">見積「${esc(p.q||'(なし)')}」 ⇔ 発注「${esc(p.o||'(なし)')}」 <span class="meta">(${esc(p.why)})</span></div>`;
+   if(!(p.q&&p.o)){h+=`<div class="row REVIEW">⚠ 組みにならなかった書類です。人が確認してください。</div></div>`;continue}
+   h+=`<div class="meta">比べた項目: ${esc(p.compared.join('・'))}${p.skipped.length?` / 比べなかった項目(片方の書類に無い): ${esc(p.skipped.join('・'))}`:''}</div>`;
+   const order={DIFF:0,REVIEW:1,OK_IMG:2,OK:3};
+   const rows=p.rows.slice().sort((a,b)=>order[a.status]-order[b.status]);
+   const okr=rows.filter(r=>r.status==='OK');
+   rows.filter(r=>r.status!=='OK').forEach(r=>h+=rowHtml(r));
+   if(okr.length)h+=`<details><summary>✅ 確実に一致した行 (${okr.length}行)</summary>${okr.map(r=>`<div class="row OK">${esc(r.model)}</div>`).join('')}</details>`;
+   h+=`</div>`;
+  }
+  h+=`</div>`;
+ }
+ $('out').innerHTML=h;$('save').style.display='';todo();
+}
+function chips(c){return `<span class="chip c-ok">✅ 確実に一致 <b>${c.OK}</b></span><span class="chip c-img">☑ 画像で一致(目で確認) <b>${c.OK_IMG}</b></span><span class="chip c-ng">❌ 違い <b>${c.DIFF}</b></span><span class="chip c-rv">⚠ 要確認 <b>${c.REVIEW}</b></span><span class="chip c-np">相手なし <b>${c.NOPAIR}</b>組</span>`}
+function rowHtml(r){
+ const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',OK_IMG:'☑ 画像で一致'}[r.status];
+ const side=(lab,img,raw)=>`<div><small>${lab}</small>${img?`<img src="data:image/png;base64,${img}">`:(raw?`<div class="raw">${esc(raw)}</div>`:'<small>(なし)</small>')}</div>`;
+ return `<div class="row ${r.status}"><label class="chk"><input type="checkbox" onchange="this.closest('.row').classList.toggle('done',this.checked);todo()"> 確認した</label><span class="mdl">${mark} ${esc(r.model)}</span>${r.msg?`<div class="msg">${esc(r.msg)}</div>`:''}<div class="two">${side('見積',r.qimg,r.qraw)}${side('発注',r.oimg,r.oraw)}</div></div>`;
+}
+function todo(){const a=document.querySelectorAll('.row:not(.OK) .chk input'),n=[...a].filter(x=>!x.checked).length;const e=$('todo');if(e)e.textContent=a.length?`確認が必要な行: ${a.length}行のうち、未確認 ${n}行`:'確認が必要な行はありません'}
+$('save').onclick=()=>{const css=document.querySelector('style').textContent;const html=`<!doctype html><meta charset="utf-8"><title>照合結果</title><style>${css}</style><body><main>${$('out').innerHTML}</main>`;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([html],{type:'text/html'}));a.download='照合結果_'+new Date().toISOString().slice(0,16).replace(/[:T]/g,'')+'.html';a.click()};
+refresh().then(()=>{if(ST.job.status==='running')poll()});
+</script></body></html>

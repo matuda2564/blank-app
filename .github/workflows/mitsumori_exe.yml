@@ -1,0 +1,57 @@
+name: mitsumori_exe
+# 見積・発注 照合ツールの Windows 版を組み立てる(Windows機が要るので GitHub のランナーを使う)
+on:
+  push:
+    branches: [main]
+    paths: ['mitsumori/**', '.github/workflows/mitsumori_exe.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install pyinstaller -r mitsumori/requirements.txt
+      - name: Tesseract(2つ目の読み取りエンジン)を用意する
+        shell: pwsh
+        run: |
+          choco install tesseract -y --no-progress
+          $t = "C:\Program Files\Tesseract-OCR"
+          Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/jpn.traineddata" -OutFile "$t\tessdata\jpn.traineddata"
+          Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/jpn_vert.traineddata" -OutFile "$t\tessdata\jpn_vert.traineddata"
+          Get-ChildItem "$t\tessdata" | Select-Object Name, Length
+          "MC_TESSERACT=$t\tesseract.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TESSDATA_PREFIX=$t\tessdata" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: ソースのまま自己点検
+        shell: pwsh
+        run: |
+          python mitsumori/launcher.py --selftest selftest_src.txt
+          Get-Content selftest_src.txt
+          if (-not (Select-String -Path selftest_src.txt -Pattern "SELFTEST OK" -Quiet)) { exit 1 }
+      - name: exe を作る
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --onedir --windowed --name MitsumoriCheck --collect-all rapidocr_onnxruntime --collect-all webview `
+            --add-data "mitsumori/index.html;." --add-data "C:\Program Files\Tesseract-OCR;tesseract" --paths mitsumori mitsumori/launcher.py
+      - name: 作った exe の自己点検
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\MitsumoriCheck\MitsumoriCheck.exe" -ArgumentList "--selftest","$PWD\selftest_exe.txt" -PassThru -Wait
+          Get-Content selftest_exe.txt
+          if (-not (Select-String -Path selftest_exe.txt -Pattern "SELFTEST OK" -Quiet)) { exit 1 }
+      - name: 配る形にまとめる
+        shell: pwsh
+        run: |
+          Copy-Item mitsumori/README.md dist\MitsumoriCheck\README.md
+          Compress-Archive -Path dist\MitsumoriCheck -DestinationPath MitsumoriCheck_win.zip
+          Get-Item MitsumoriCheck_win.zip | Select-Object Name, Length
+      - name: ダウンロードできる場所に置く
+        shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          gh release create "build-${{ github.run_number }}" MitsumoriCheck_win.zip --title "見積照合 build ${{ github.run_number }}" --notes "Windows版(zipを解凍して MitsumoriCheck.exe を起動)"
+      - uses: actions/upload-artifact@v4
+        with: { name: MitsumoriCheck_win, path: MitsumoriCheck_win.zip }
