@@ -866,12 +866,12 @@ def apply_item_rows(d):
             v = dt.get(k)
             if not v or v.get("noise"): continue
             o = m2.get(k)
-            if not v["sure"]: r["problems"].append("型式が、2種類の読み取りの片方でしか、見つからない")
+            if not v["sure"]: r["unverified"] = True; r.setdefault("unv_why", []).append("型式が、2種類の読み取りの片方でしか、見つからない")
             if o:
                 if any(o.get(x) != r.get(x) for x in ("qty", "price", "amount")): r["problems"].append("画像の2種類の読み取りで、数量・単価・金額が食い違う")
             elif not (r.get("qty") and r.get("price") and r.get("amount") is not None):
-                r["problems"].append("数量・単価・金額を、2種類の読み取りで確かめられない(見出しの列を読めなかった)")
-            r["exact"] = not r["problems"]
+                r["unverified"] = True; r.setdefault("unv_why", []).append("数量・単価・金額を、2種類の読み取りで確かめられない(見出しの列を読めなかった)")
+            r["exact"] = not r["problems"] and not r.get("unverified")
             keep.append(r)
         r1 = keep
         if not r1: return
@@ -896,6 +896,19 @@ def compare(q, o):
     fq, fo = fields_of(q), fields_of(o)
     both = [k for k in ("name", "unit", "price", "amount", "due") if k in fq and k in fo]
     skipped = [JP[k] for k in ("name", "unit", "price", "amount", "due") if (k in fq) != (k in fo)]
+    def _glued(longk, shortk):   # 「B9565AW-T 10冊入」が「B9565AW-T10」と、くっついて読まれた型(末尾に、数字が1〜2桁、余分についた)
+        return len(shortk) >= 5 and longk.startswith(shortk) and 1 <= len(longk) - len(shortk) <= 2 and longk[len(shortk):].isdigit()
+    for X, Y in ((q, o), (o, q)):
+        if X.src != "ocr" or Y.src == "ocr": continue   # 画像の側だけを、文字入りの相手に、そろえる(逆はしない)
+        ykeys = {tkey(r["model_raw"]): r for r in Y.rows}
+        for r in X.rows:
+            k = tkey(r["model_raw"])
+            if k in ykeys: continue
+            hit = next((yk for yk in ykeys if _glued(k, yk)), None)
+            if hit:
+                r["glued_from"] = r["model_raw"]; r["model_raw"] = ykeys[hit]["model_raw"]; r["model"] = ykeys[hit]["model"]
+                r["unverified"] = True; r.setdefault("unv_why", []).append(f"画像で「{r['glued_from']}」と読めた(型式の後ろに、数量などの数字がくっついた可能性)。相手の書類の型式にそろえて比べた")
+                r["exact"] = False
     qmap, omap = {}, {}
     for r in q.rows: qmap.setdefault(r["model"], []).append(r)
     for r in o.rows: omap.setdefault(r["model"], []).append(r)
@@ -927,8 +940,11 @@ def compare(q, o):
                 res.append({"status": "DIFF", "model": a["model_raw"], "msg": " / ".join(diffs), "qrow": a, "orow": b})
             elif diffs:
                 res.append({"status": "REVIEW", "model": a["model_raw"], "msg": "違いに見えるが、読み取りが確実でない: " + " / ".join(diffs), "qrow": a, "orow": b})
+            elif not probs and not sure and ocr and (a.get("unverified") or b.get("unverified")) and (a["exact"] or a.get("unverified")) and (b["exact"] or b.get("unverified")) and a.get("src") != b.get("src") and any(k in ("qty", "amount") for k in ("qty", "amount") if a.get(k) is not None and a.get(k) == b.get(k)):
+                why = list(dict.fromkeys(a.get("unv_why", []) + b.get("unv_why", [])))
+                res.append({"status": "OK_IMG", "model": a["model_raw"], "msg": "型式・数量・金額は、相手の書類と一致しました。ただし、画像の読み取りが確実でないので、画像を見て確認してください(" + " / ".join(why) + ")", "qrow": a, "orow": b})
             elif probs or not sure:
-                res.append({"status": "REVIEW", "model": a["model_raw"], "msg": "読み取りに自信がない: " + " / ".join(dict.fromkeys(probs or ["読み取りが確実でない"])), "qrow": a, "orow": b})
+                res.append({"status": "REVIEW", "model": a["model_raw"], "msg": "読み取りに自信がない: " + " / ".join(dict.fromkeys(probs + a.get("unv_why", []) + b.get("unv_why", []) or ["読み取りが確実でない"])), "qrow": a, "orow": b})
             else:
                 msg = ("品名・単位・納期は、読み取りに自信がないので、画像を見て確認してください(" + " / ".join(dict.fromkeys(notes)) + ")") if (ocr and notes) else ""
                 res.append({"status": "OK_IMG" if ocr else "OK", "model": a["model_raw"], "msg": msg, "qrow": a, "orow": b})
@@ -943,8 +959,8 @@ def compare(q, o):
     for d, nm in ((q, "見積"), (o, "発注")):
         if not d.rows:
             res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}書から明細行を1行も読めなかった: " + " / ".join(d.notes or ["原因不明"]), "qrow": None, "orow": None, "doc": "q" if nm == "見積" else "o"})
-        elif d.notes:
-            res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}書: " + " / ".join(d.notes), "qrow": None, "orow": None, "doc": "q" if nm == "見積" else "o"})
+        elif [n for n in d.notes if "傾いていた" not in n]:   # 向きを直したことは、お知らせであって、要確認ではない(読み取った中身の注意に出す)
+            res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}書: " + " / ".join(n for n in d.notes if "傾いていた" not in n), "qrow": None, "orow": None, "doc": "q" if nm == "見積" else "o"})
     return res, [JP[k] for k in ["model", "qty"] + both], skipped
 
 
@@ -1097,7 +1113,7 @@ def compare_qq(a, b, with_qty=False):
         if ign[sd]:
             ex = "、".join(ign[sd][:4]) + ("…" if len(ign[sd]) > 4 else "")
             res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}: 画像から、型番かどうか判断できない文字列を、{len(ign[sd])}個、読み取りましたが、無視しています(例: {ex})。画像の汚れによる読み間違いの可能性が高いものです。型番が、ほかにないか、画像を見て確認してください(「読み取った中身を見る」に、全部あります)", "qrow": None, "orow": None, "doc": sd})
-        notes = [n for n in d.notes if "合計を読めなかった" not in n and "見出しを読めない" not in n and "見出し行が見つからない" not in n]   # 型番を拾うのに、表の見出しは、要らない
+        notes = [n for n in d.notes if "合計を読めなかった" not in n and "見出しを読めない" not in n and "見出し行が見つからない" not in n and "傾いていた" not in n]   # 型番を拾うのに、表の見出しは、要らない
         if not tk:
             res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}書から、型番らしい文字列を、1つも見つけられなかった(英字と数字が混ざった4文字以上の文字列を探しています)。" + (" / ".join(notes) if notes else ""), "qrow": None, "orow": None, "doc": "q" if nm == "客先見積" else "o"})
         elif notes:

@@ -23,3 +23,20 @@ n2 = L(130, [("AE20-133*0.6MPA", 20, 110)])
 rows2, _ = C.item_rows([hdr2, n1, n2])
 assert [(x["model_raw"], x["qty"], x["price"], x["amount"], x["unit"]) for x in rows2] == [("AE20-133", 2, 10875, 21750, "個")], rows2
 print("qo_rows_test OK")
+
+# 画像で「B9565AW-T10」とくっついて読まれても、文字入りの相手の「B9565AW-T」にそろえて比べ、一致なら『画像で一致(目で確認)』にする
+def mk(role, src, model, qty, price, amount, exact, unv):
+    d = C.Doc("/x/" + role + ".pdf", role); d.src = src; d.kind = "スキャンPDF" if src == "ocr" else "文字入りPDF"
+    r = {"model_raw": model, "model": C.norm(model), "qty": qty, "price": price, "amount": amount, "unit": None, "name": None, "due": None,
+         "problems": [], "soft": [], "exact": exact, "src": src, "raw": model}
+    if unv: r["unverified"] = True; r["unv_why"] = ["数量・単価・金額を、2種類の読み取りで確かめられない"]
+    d.rows = [r]; d.text = ""; return d
+q = mk("見積", "text", "B9565AW-T", 1, 15800, 15800, True, False)
+o = mk("発注", "ocr", "B9565AW-T10", 1, None, 15800, False, True)
+res, _, _ = C.compare(q, o)
+assert [x["status"] for x in res] == ["OK_IMG"] and res[0]["model"] == "B9565AW-T", res
+# 金額が違えば、一致にしない
+o2 = mk("発注", "ocr", "B9565AW-T10", 1, None, 14000, False, True)
+res2, _, _ = C.compare(q, o2)
+assert res2[0]["status"] in ("REVIEW", "DIFF") and "金額" in res2[0]["msg"], res2
+print("qo_glue_test OK")
