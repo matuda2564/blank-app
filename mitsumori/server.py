@@ -13,6 +13,7 @@ import mc_core as C
 VERSION = "v1"
 TOKEN = secrets.token_urlsafe(18)   # 起動ごとに変わる合言葉。これを持たない要求は断る(他のサイトからの勝手な操作を防ぐ)
 PORT = {"n": 0}
+LAST_SEEN = [time.time()]   # 画面(ブラウザ)が、最後に、問い合わせてきた時刻。画面が開いているかを知るため
 WORK_BASE = os.environ.get("MC_WORK") or os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "見積照合_作業フォルダ")
 WORK = WORK_BASE   # start() で、このアプリ専用の場所(run_<番号>)に切り替わる
 MAX_UPLOAD = 300 * 1024 * 1024   # 1ファイルの上限(300MB)
@@ -189,6 +190,7 @@ class H(BaseHTTPRequestHandler):
         tok = self.headers.get("X-MC-Token") or dict(urllib.parse.parse_qsl(u.query)).get("t")
         if not tok or not secrets.compare_digest(tok, TOKEN):
             self._send(403, {"error": "合言葉がありません。アプリから開き直してください"}); return False
+        LAST_SEEN[0] = time.time()
         return True
 
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
