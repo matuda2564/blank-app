@@ -560,7 +560,7 @@ def read_doc(path, role, cancel=None):
                         d.pages.append((PageImg(png=pm.tobytes("png"), size=(pm.width, pm.height)), page_scale_dpi(110)))
                         d.kind = "文字入りPDF"
                         lines = group_lines(tsegs); d.text += " ".join(l["text"] for l in lines) + "\n"
-                        d.lines += [{"page": pno, "text": l["text"], "x0": l["x0"], "y0": l["y0"], "x1": l["x1"], "y1": l["y1"], "src": "text"} for l in lines]
+                        d.lines += [{"page": pno, "text": l["text"], "x0": l["x0"], "y0": l["y0"], "x1": l["x1"], "y1": l["y1"], "src": "text", "toks": tokens_of(l)} for l in lines]
                         rows, total, err = parse_rows(lines)
                         for r in rows: r["exact"] = not r["problems"]; r["page"] = pno; r["src"] = "text"
                         d.rows += rows; d.total = total if total is not None else d.total
@@ -619,8 +619,8 @@ def read_doc(path, role, cancel=None):
 def scan_ocr(d, im, pno, extra):
     sa, sb = ocr_rapid(im), ocr_tess(im)
     la, lb = group_lines(sa), group_lines(sb)
-    d.lines += [{"page": pno, "text": l["text"], "x0": l["x0"], "y0": l["y0"], "x1": l["x1"], "y1": l["y1"], "src": "ocr"} for l in la]
-    d.lines2 += [{"page": pno, "text": l["text"], "x0": l["x0"], "y0": l["y0"], "x1": l["x1"], "y1": l["y1"], "src": "ocr"} for l in lb]
+    d.lines += [{"page": pno, "text": l["text"], "x0": l["x0"], "y0": l["y0"], "x1": l["x1"], "y1": l["y1"], "src": "ocr", "toks": tokens_of(l)} for l in la]
+    d.lines2 += [{"page": pno, "text": l["text"], "x0": l["x0"], "y0": l["y0"], "x1": l["x1"], "y1": l["y1"], "src": "ocr", "toks": tokens_of(l)} for l in lb]
     if sa and not sb:
         d.notes.append(f"{pno+1}ページ: 2つ目の読み取り(Tesseract)が動かなかった。確実とは言えないので、全部、人が確認してください")
     d.text += " ".join(l["text"] for l in la) + "\n"
@@ -826,7 +826,7 @@ def compare(q, o):
 
 
 # ------------------------------------------------------------------ 型番らしい文字列を、書類全体から拾う(見積 ⇔ 見積用)
-_UNIT_RE = re.compile(r"^\d+(MM|CM|KG|ML|HZ|PCS|[MGLVAW])$")
+_UNIT_RE = re.compile(r"^\d+(MM|CM|KG|ML|HZ|PCS|MPA|KPA|PA|RPM|[MGLVAW])$")
 
 
 def model_tokens(text):
@@ -839,9 +839,53 @@ def model_tokens(text):
         tok = m.group(0).strip("-./"); u = tok.upper(); k = re.sub(r"[^A-Z0-9]", "", u)
         if len(k) < 4 or not re.search(r"[A-Z]", k) or not re.search(r"\d", k): continue
         if u.startswith(("TEL", "FAX", "NO.", "WWW.", "HTTP")) or "@" in u: continue
+        if re.search(r"\d/\d", u): continue   # 3/8 などの、インチの寸法(型番ではなく、品名の一部)
         if re.fullmatch(r"T\d{13}", k) or re.fullmatch(r"T?\d{7}", k) or _UNIT_RE.match(k): continue   # インボイス登録番号・郵便番号(〒がTに化ける)・単位つきの数字
         out.append(tok)
     return out
+
+
+_QTY_WORDS = ("数量", "数", "単位", "単価", "金額")
+_END_WORDS = ("以下余白", "合計", "小計", "頁計", "備考", "消費税")
+
+
+def item_region(lines):
+    """表の『型式・品名の列』だけを切り出す。戻り: (行のリスト, 説明, 見出しを見つけたか)
+    ①ページごとに、見出し行(数量+品名/型式など)を探す ②見出しの『数量・単位・単価・金額』の列より左だけを、型式・品名の列として使う
+    ③見出しの下から、合計・備考・以下余白の行の手前までを、明細として読む(宛先・日付・備考・住所は読まない)。
+    見出しが見つからないページは、そのページ全体を使い、その旨を説明に残す"""
+    out, notes, found_any, missing = [], [], False, []
+    pages = sorted({L.get("page", 0) for L in lines})
+    for pg in pages:
+        pl = [L for L in lines if L.get("page", 0) == pg]
+        hi = None
+        for i, L in enumerate(pl):
+            t = "".join(VARIANT.get(ch, ch) for ch in norm(L["text"]))
+            if ("数量" in t or ("数" in t and "量" in t)) and _has_any(t, HDR["model"] + HDR["name"] + ("仕様", "仕樣", "摘要")):
+                hi = i; break
+        if hi is None or not pl[hi].get("toks"):
+            out += pl; missing.append(pg + 1); continue
+        found_any = True
+        qx = None
+        for t, a, b in pl[hi]["toks"]:
+            nt = "".join(VARIANT.get(ch, ch) for ch in norm(t))
+            if any(w in nt for w in _QTY_WORDS) or nt in ("数", "量"):
+                qx = a if qx is None else min(qx, a)
+        end = len(pl)
+        for j in range(hi + 1, len(pl)):
+            tk = pl[j].get("toks") or []
+            lead = [t for t, a, b in tk if qx is None or (a + b) / 2 < qx] or [t for t, _, _ in tk[:1]]   # 左側の文字(なければ、行の先頭)だけで、終わりの印を探す(右の列の備考に、惑わされない)
+            nt = "".join(VARIANT.get(ch, ch) for ch in norm(" ".join(lead) if tk else pl[j]["text"]))
+            if _has_any(nt, _END_WORDS) and not _has_any(nt, HDR["model"] + HDR["name"]): end = j; break   # 2段目の見出し(型式 備考)は、終わりの印ではない
+        for L in pl[hi + 1:end]:
+            if qx is None or not L.get("toks"):
+                out.append(L); continue
+            keep = [(t, a, b) for t, a, b in L["toks"] if (a + b) / 2 < qx]
+            if not keep: continue
+            L2 = dict(L); L2["text"] = " ".join(t for t, _, _ in keep); L2["x1"] = min(L["x1"], max(b for _, _, b in keep)); out.append(L2)
+    if found_any: notes.append("表の見出しを見つけたので、数量・単価・金額より左(型式・品名の列)だけを読んだ")
+    if missing: notes.append(f"見出しが見つからなかったページ({','.join(map(str, missing))})は、そのページ全体から拾った(精度が下がる)")
+    return out, " / ".join(notes), found_any
 
 
 def tkey(tok):
@@ -855,6 +899,7 @@ def doc_tokens(d):
           両方で見つかった型番だけを「確実」とし、片方でしか見つからないものは、「確実でない」(必ず人が見る)とする"""
     def collect(lines):
         out = {}
+        if d.src != "excel": lines, _, _ = item_region(lines)
         for L in lines:
             for tok in model_tokens(L["text"]):
                 k = tkey(tok)
@@ -892,7 +937,7 @@ def _tok_row(d, k, v):
 
 def compare_qq(a, b, with_qty=False):
     """見積同士を比べる(a=客先に出した見積 / b=仕入先の見積)。
-    書類の形(表の列の分け方)に頼らず、書類全体の文字から、型番らしい文字列を拾って、比べる。
+    表の見出しから「型式・品名の列(数量・単価・金額より左)」だけを切り出し(見出しが無いページは、そのページ全体)、その中から型番らしい文字列を拾って、比べる。
     品名・数量・単価・金額・合計・納期・単位は、書類ごとに違って当たり前なので、比べない。
     「確実」と言い切れる型番だけ OK を出す。自信がない・近い型番・片方にしかない型番は、必ず人に見せる(黙って通さない)。"""
     res = []
@@ -1015,7 +1060,7 @@ def doc_info(d, mode="qo"):
     if d is None: return None
     if mode == "qq":
         tk = doc_tokens(d)
-        return {"name": d.name, "kind": d.kind, "notes": d.notes[:6], "mode": "qq", "nlines": len(d.lines),
+        return {"name": d.name, "kind": d.kind, "notes": d.notes[:6], "mode": "qq", "nlines": len(d.lines), "region": item_region(d.lines)[1] if d.src != "excel" else "Excelは全セルから拾った",
                 "rows": [{"m": v["raw"], "n": v["line"]["text"][:90], "q": None, "sure": v["sure"], "noise": bool(v.get("noise"))} for v in list(tk.values())[:300]]}
     return {"name": d.name, "kind": d.kind, "notes": d.notes[:6], "mode": "qo",
             "rows": [{"m": r.get("model_raw"), "n": r.get("name"), "q": r.get("qty")} for r in d.rows[:300]]}
