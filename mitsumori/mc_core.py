@@ -708,7 +708,8 @@ def pair_docs(quotes, orders):
         if cand and cand[0][0] >= 0.5 and (len(cand) == 1 or cand[0][0] - cand[1][0] >= 0.2 or cand[0][0] >= 2.0):
             used.add(cand[0][1]); pairs.append((quotes[cand[0][1]], o, cand[0][2]))
         else:
-            pairs.append((None, o, "対応する見積書が決まらない"))
+            best = f"{cand[0][0]:.0%}" if cand and cand[0][0] < 2.0 else "0%"
+            pairs.append((None, o, f"相手が決まらない。見積番号が一致せず、型式の重なりが最大でも {best}(組にする基準は、50%以上で、2番目より20ポイント以上高いこと)"))
     for i, q in enumerate(quotes):
         if i not in used:
             pairs.append((q, None, "対応する発注書がない"))
@@ -912,6 +913,13 @@ ROLES_BY_MODE = {"qo": ("見積", "発注"), "qq": ("客先見積", "仕入先�
 SKIPNOTE_QQ = "単価・金額・合計・納期・単位(違って当たり前なので、比べません)"
 
 
+def doc_info(d):
+    """画面に出す『ツールが、この書類から、何を読んだか』(判断の基準が、見えるように)"""
+    if d is None: return None
+    return {"name": d.name, "kind": d.kind, "notes": d.notes[:6],
+            "rows": [{"m": r.get("model_raw"), "n": r.get("name"), "q": r.get("qty")} for r in d.rows[:300]]}
+
+
 def run_vendor(vdir, workers=4, progress=None, name=None, mode="qo", with_qty=False, cancel=None):
     roles = ROLES_BY_MODE[mode]
     out = {"vendor": name or os.path.basename(vdir), "pairs": [], "warnings": []}
@@ -927,7 +935,7 @@ def run_vendor(vdir, workers=4, progress=None, name=None, mode="qo", with_qty=Fa
         k = kind_of(d.text)
         if mode == "qo":
             if k and k != d.role:
-                out["warnings"].append(f"{d.role}フォルダの「{d.name}」は、中身が「{k}」と読める。入れる場所を間違えていないか確認してください")
+                out["warnings"].append(f"{d.role}フォルダの「{d.name}」は、中身が「{k}」と読める。入れる場所を間違えていないか確認してください" + ("(見積同士を比べるときは、上の「見積 ⇔ 見積」のタブを使います)" if k == "見積" and d.role == "発注" else ""))
         elif k == "発注":
             out["warnings"].append(f"{d.role}フォルダの「{d.name}」は、中身が「発注書」と読める。見積書を入れる場所です。間違えていないか確認してください")
         docs[d.role].append(d)

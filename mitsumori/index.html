@@ -51,6 +51,7 @@ button.sm.pri{background:var(--pri);color:#fff}
 .tabs button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px 8px 0 0;padding:9px 16px;font:inherit;font-size:14px;cursor:pointer}
 .tabs button.on{background:var(--pri);color:#fff;border-color:var(--pri);font-weight:700}
 .bn{margin:8px 20px 0;padding:10px 14px;border-radius:8px;font-size:14px;line-height:1.6}.bn.ng{background:var(--ngbg);color:#7a1f1f;border:1px solid var(--ng)}.bn.rv{background:var(--rvbg);color:#5c4300;border:1px solid var(--rv)}
+.rd{border-collapse:collapse;font-size:12px;margin:4px 0}.rd td,.rd th{border:1px solid var(--line);padding:2px 8px;text-align:left}.rdp{margin:6px 0;font-size:13px}.rdp summary{cursor:pointer;color:var(--pri)}
 .opt{margin:8px 0;font-size:14px}.opt small{color:var(--sub)}
 @media print{header,.slots,.bar,.note,.tabs,.opt{display:none}}
 </style></head><body>
@@ -67,6 +68,13 @@ button.sm.pri{background:var(--pri);color:#fff}
 <b>✅ 確実に一致</b>=文字入りPDF・Excelで全項目が一致 / <b>☑ 画像で一致</b>=画像を2種類の読み取りで確認。<b>似た文字(0とO、1とI)の読み違いは完全には防げない</b>ので、画像を見て確認してください / <b>❌ 違い</b> / <b>⚠ 要確認</b>=読み取れない・自信がない。<b>✅以外は、必ず人が見てください。</b>
 </div>
 <div class="opt" id="qtyrow" hidden><label><input type="checkbox" id="qty"> 数量も比べる</label> <small>(チェックなし=型式と品名だけ)</small></div>
+<details class="note" id="criteria"><summary><b>どういう基準で、判断していますか?</b>(クリックで開く)</summary>
+<p><b>① 書類の読み方</b>: 文字入りのPDFとExcelは、書いてある文字を、そのまま読みます。スキャン・写真は、2種類の読み取り(RapidOCR と Tesseract)で読み、<b>2つが一致した行だけ</b>「確実」とします。表の「見出し」(型式・数量・単価・金額など)の位置で、列を分けます。結果の下の「読み取った中身を見る」で、<b>何を読んだか</b>を確認できます。</p>
+<p><b>② 組の決め方</b>(見積 ⇔ 発注): 見積番号が同じなら組にします。番号がないときは、<b>型式の重なりが50%以上</b>で、2番目の候補より20ポイント以上高いときだけ組にします。決まらなければ「組みにならなかった」と出します。<br>(見積 ⇔ 見積): 客先1枚・仕入先1枚なら、そのまま組にします。複数あるときは、同じ基準で決めます。</p>
+<p><b>③ 同じ型式の判定</b>: 全角と半角、大文字と小文字、ハイフン、空白の違いは、<b>同じ</b>とみなします。それ以外の違いは、<b>1文字でも、違う</b>とします。1〜2文字だけ違う型式は「近い型式」として、<b>要確認</b>に出します。</p>
+<p><b>④ 比べる項目</b>: 見積 ⇔ 発注は、型式・数量・単価・金額・品名・単位・納期。見積 ⇔ 見積は、<b>型式と品名だけ</b>(数量は、チェックを入れたときだけ)。単価・金額・合計は、比べません。</p>
+<p><b>⑤ 結果の意味</b>: ✅=文字入りPDF・Excelで、全項目が一致 / ☑=画像で、2種類の読み取りが一致(目で確認) / ❌=違いがある(はっきり読めている) / ⚠=読み取りに自信がない・近い型式・品名の違いなど。<b>✅以外は、必ず人が見てください。</b></p>
+</details>
 <div class="slots" id="slots"></div>
 <div class="bar">
 <button class="big go" id="go">照合する</button>
@@ -124,6 +132,7 @@ async function up(slot,role,files){
  $('out').innerHTML='';$('save').style.display='none';await refresh();
 }
 async function rm(slot,role,name){await api(`/api/remove?mode=${MODE}&slot=${slot}&role=${encodeURIComponent(role)}&name=${encodeURIComponent(name)}`,{method:'POST'});$('out').innerHTML='';$('save').style.display='none';refresh()}
+async function moveToQQ(slot){if(!confirm('この社の書類を、「見積 ⇔ 見積」のタブへ移します。\n(見積書の枠 → 客先に出した見積 / 発注書の枠 → 仕入先の見積)\nよろしいですか?'))return;try{await api(`/api/move?slot=${slot}`,{method:'POST'})}catch(e){alert(e.message);return}setMode('qq')}
 async function resetSlot(slot){const n=(ST.slots.find(x=>x.id===slot)||{}).name||'この社';if(!confirm(n+'の書類と結果を消します。よろしいですか?'))return;try{await api(`/api/reset?mode=${MODE}&slot=${slot}`,{method:'POST'})}catch(e){alert(e.message)}$('out').innerHTML='';$('save').style.display='none';refresh()}
 async function rename(slot,name){await api(`/api/name?mode=${MODE}&slot=${slot}&name=${encodeURIComponent(name)}`,{method:'POST'})}
 $('go').onclick=async()=>{try{await api(`/api/run?mode=${MODE}&qty=${$('qty').checked?1:0}`,{method:'POST'});$('out').innerHTML='';$('save').style.display='none';poll()}catch(e){alert(e.message)}};
@@ -143,10 +152,12 @@ async function showResult(){
  for(const v of R){
   h+=`<div class="vendor"><h2>${esc(v.vendor)}</h2><div class="chips">${chips(v.count)}</div>`;
   v.warnings.forEach(w=>h+=`<div class="warn">⚠ ${esc(w)}</div>`);
+  if(MODE==='qo'&&v.slot&&v.warnings.some(w=>w.includes('中身が「見積」と読める')))h+=`<div class="warn"><button class="sm pri" onclick="moveToQQ(${v.slot})">この社の書類を「見積 ⇔ 見積」のタブへ移す</button> <small>(「見積書」の枠 → 客先に出した見積 / 「発注書」の枠 → 仕入先の見積 に、なります。逆なら、移したあとで、入れ替えてください)</small></div>`;
   for(const p of v.pairs){
    h+=`<div class="pair"><div class="tt">${ROLES[0]}「${esc(p.q||'(なし)')}」 ⇔ ${ROLES[1]}「${esc(p.o||'(なし)')}」 <span class="meta">(${esc(p.why)})</span></div>`;
-   if(!(p.q&&p.o)){h+=`<div class="row REVIEW">⚠ 組みにならなかった書類です。人が確認してください。</div></div>`;continue}
+   if(!(p.q&&p.o)){h+=`<div class="row REVIEW">⚠ 組みにならなかった書類です。人が確認してください。<br><small>理由: ${esc(p.why)}</small></div>${readPanel(p)}</div>`;continue}
    h+=`<div class="meta">比べた項目: ${esc(p.compared.join('・'))}${p.skipnote?` / 比べない項目: ${esc(p.skipnote)}`:(p.skipped.length?` / 比べなかった項目(片方の書類に無い): ${esc(p.skipped.join('・'))}`:'')}</div>`;
+   h+=readPanel(p);
    const order={DIFF:0,REVIEW:1,OK_IMG:2,OK:3};
    const rows=p.rows.slice().sort((a,b)=>order[a.status]-order[b.status]);
    const okr=rows.filter(r=>r.status==='OK');
@@ -158,6 +169,9 @@ async function showResult(){
  }
  $('out').innerHTML=h;$('save').style.display='';todo();
 }
+function readPanel(p){
+ const one=(lab,d)=>d?`<div><b>${esc(lab)}「${esc(d.name)}」</b> <small>(${esc(d.kind||'種類不明')}・${d.rows.length}行を読み取り)</small>${d.rows.length?`<table class="rd"><tr><th>型式(読んだまま)</th><th>品名</th><th>数量</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.m)}</td><td>${esc(r.n||'')}</td><td>${esc(r.q==null?'':r.q)}</td></tr>`).join('')}</table>`:'<div class="warn">明細の行を、1行も読めませんでした</div>'}${d.notes.length?`<div class="meta">注意: ${esc(d.notes.join(' / '))}</div>`:''}</div>`:'';
+ return `<details class="rdp"><summary>読み取った中身を見る(ツールが、書類から、何を読んだか)</summary><div class="two">${one(ROLES[0],p.qread)}${one(ROLES[1],p.oread)}</div></details>`}
 function chips(c){return `<span class="chip c-ok">✅ 確実に一致 <b>${c.OK}</b></span><span class="chip c-img">☑ 画像で一致(目で確認) <b>${c.OK_IMG}</b></span><span class="chip c-ng">❌ 違い <b>${c.DIFF}</b></span><span class="chip c-rv">⚠ 要確認 <b>${c.REVIEW}</b></span><span class="chip c-np">相手なし <b>${c.NOPAIR}</b>組</span>`}
 function rowHtml(r,idx){
  const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',OK_IMG:'☑ 画像で一致'}[r.status];
