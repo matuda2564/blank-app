@@ -3,7 +3,7 @@
 ・127.0.0.1(自分のパソコンだけ)で待ち受ける。外のネットには何も送らない。
 ・書類は作業フォルダに置き、リセットで全部消す。過去の書類を覚えない。
 """
-import os, sys, json, re, shutil, threading, time, base64, io, urllib.parse, tempfile, secrets
+import os, sys, json, re, shutil, threading, time, base64, io, urllib.parse, tempfile, secrets, traceback, faulthandler
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 HERE = os.path.dirname(os.path.abspath(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))))
@@ -99,11 +99,12 @@ def run_job():
             def prog(done, tot, base=base):
                 JOB["done"] = base["n"] + done
             n_in = sum(len(os.listdir(slot_dir(i, r))) for r in ROLES if os.path.isdir(slot_dir(i, r)))
-            vendors.append(C.run_vendor(slot_dir(i), workers=4, progress=prog, name=NAMES[i]))
+            vendors.append(C.run_vendor(slot_dir(i), workers=C.auto_workers(), progress=prog, name=NAMES[i]))
             base["n"] += n_in; JOB["done"] = base["n"]
         JOB["result"] = serialize(vendors)
         JOB["status"] = "done"
-    except Exception as e:  # 失敗は隠さず画面に出す
+    except BaseException as e:  # 失敗は隠さず画面に出す(ログにも残す)
+        C.log("照合が失敗: " + traceback.format_exc())
         JOB["status"] = "error"; JOB["msg"] = f"{type(e).__name__}: {e}"
     JOB["sec"] = round(time.time() - JOB["t0"])
 
@@ -184,8 +185,24 @@ class H(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
 
+def setup_log():
+    """落ちたとき、原因を調べられるように、ログを残す。書類の中身は、書かない。場所: 作業フォルダの1つ上の mitsumori_check_log.txt"""
+    try:
+        C.LOGFILE = os.path.join(os.path.dirname(WORK), "mitsumori_check_log.txt")
+        if os.path.exists(C.LOGFILE) and os.path.getsize(C.LOGFILE) > 2_000_000:
+            os.replace(C.LOGFILE, C.LOGFILE + ".old")
+        C.log(f"=== 起動 {VERSION} / 空きメモリ {C.avail_mb()}MB / コア {os.cpu_count()} / 同時に読む数 {C.auto_workers()} ===")
+        fh = open(C.LOGFILE, "a", encoding="utf-8")
+        faulthandler.enable(file=fh, all_threads=True)   # アプリが強制的に落ちたときも、その場所を残す
+        sys.excepthook = lambda a, b, c: C.log("想定外の例外: " + "".join(traceback.format_exception(a, b, c)))
+        threading.excepthook = lambda args: C.log("スレッドの例外: " + "".join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback)))
+    except Exception:
+        pass
+
+
 def start(port=0):
     os.makedirs(WORK, exist_ok=True)
+    setup_log()
     shutil.rmtree(WORK, ignore_errors=True); os.makedirs(WORK, exist_ok=True)   # 起動時にも前回の書類は消す(覚えない)
     srv = ThreadingHTTPServer(("127.0.0.1", port), H)
     PORT["n"] = srv.server_address[1]

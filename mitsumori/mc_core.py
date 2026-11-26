@@ -7,12 +7,82 @@
   ・過去の書類を記憶しない。1回の実行で読むのは、渡されたフォルダの中だけ。(状態を持たない)
   ・OK は2段階: OK=文字入りPDF/Excel(読み取りの間違いが起きない)  OK_IMG=画像を2種類のOCRが一致して読んだ(ほぼ確実)
 """
-import os, re, io, json, unicodedata, subprocess, tempfile, base64, time
+import os, re, io, json, unicodedata, subprocess, tempfile, base64, time, gc, sys, traceback
 from decimal import Decimal, InvalidOperation
 
 import fitz  # PyMuPDF
 import openpyxl
 from PIL import Image
+
+
+# ------------------------------------------------------------------ メモリとログ(落ちる原因を減らす・落ちたとき原因を残す)
+MAX_PAGES = int(os.environ.get("MC_MAXPAGES") or 40)      # 1書類で読むページの上限(超えたら、読んでいないと明示する)
+MAX_SIDE = int(os.environ.get("MC_MAXSIDE") or 3600)      # 画像の長い辺の上限(これより大きい写真は縮める)
+MB_PER_WORKER = 800                                       # 同時に読む1本あたり、見込むメモリ(MB)
+LOGFILE = None
+
+
+def log(msg):
+    """ログをファイルに残す(落ちた原因を、あとで調べるため)。書類の中身は、書かない"""
+    if not LOGFILE: return
+    try:
+        with open(LOGFILE, "a", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+    except Exception:
+        pass
+
+
+def avail_mb():
+    """いま、使えるメモリ(MB)。わからなければ None"""
+    try:
+        if os.name == "nt":
+            import ctypes
+            class MS(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong), ("ullTotalPhys", ctypes.c_ulonglong),
+                            ("ullAvailPhys", ctypes.c_ulonglong), ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong), ("sullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            st = MS(); st.dwLength = ctypes.sizeof(MS)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st))
+            return int(st.ullAvailPhys // 2 ** 20)
+        with open("/proc/meminfo") as f:
+            for ln in f:
+                if ln.startswith("MemAvailable"):
+                    return int(ln.split()[1]) // 1024
+    except Exception:
+        pass
+    return None
+
+
+def auto_workers(max_w=4):
+    """同時に読む数。パソコンのコア数と、空いているメモリから決める(足りないパソコンで落ちないように)"""
+    w = min(max_w, max(1, os.cpu_count() or 2))
+    a = avail_mb()
+    if a is not None:
+        w = min(w, max(1, int(a // MB_PER_WORKER)))
+    return w
+
+
+_LAST_IMG = {}
+
+
+class PageImg:
+    """ページの画像を、圧縮したまま持つ(1ページ数MB→数百KB。メモリ節約)。使うときだけ開く"""
+    def __init__(self, im=None, png=None, size=None):
+        if png is None:
+            b = io.BytesIO(); im.convert("RGB").save(b, "PNG", compress_level=3); png = b.getvalue(); size = im.size
+        self._b, (self.width, self.height) = png, size
+
+    def get(self):
+        k = id(self)
+        if _LAST_IMG.get("k") != k:
+            _LAST_IMG.clear(); _LAST_IMG["k"] = k
+            _LAST_IMG["im"] = Image.open(io.BytesIO(self._b)).convert("RGB")
+        return _LAST_IMG["im"]
+
+    def crop(self, box): return self.get().crop(box)
+    def resize(self, *a, **k): return self.get().resize(*a, **k)
+    def convert(self, mode): return self.get().convert(mode)
+
 
 DASH = "‐‑‒–—―−ー－─"
 UNITS = "個枚本箱セット式台袋缶ケース組巻冊"
@@ -404,43 +474,77 @@ def read_doc(path, role):
     t0 = time.time()
     d = Doc(path, role)
     ext = os.path.splitext(path)[1].lower()
+    # メモリが足りないときは、少し待つ。それでも足りなければ、落ちずに「読めなかった」と出す
+    for _ in range(30):
+        a = avail_mb()
+        if a is None or a >= 500: break
+        time.sleep(2)
+    else:
+        d.notes.append("パソコンのメモリが足りず、読めなかった。他のアプリを閉じてから、もう一度やり直してください")
+        log(f"メモリ不足で読めず: {d.name} (空き {avail_mb()}MB)")
+        return d
+    log(f"読み始め: {d.name} 空き{avail_mb()}MB")
     try:
         if ext in (".xlsx", ".xlsm"):
             read_excel(d)
         elif ext == ".pdf":
             pdf = fitz.open(path)
+            npages = len(pdf)
             for pno, page in enumerate(pdf):
-                scanned = is_scanned_page(page)
-                tsegs = text_segs_of_page(page)
-                if not scanned and tsegs:
-                    pm = page.get_pixmap(dpi=110)
-                    d.pages.append((Image.open(io.BytesIO(pm.tobytes("png"))), page_scale_dpi(110)))
-                    d.kind = "文字入りPDF"
-                    lines = group_lines(tsegs); d.text += " ".join(l["text"] for l in lines) + "\n"
-                    rows, total, err = parse_rows(lines)
-                    for r in rows: r["exact"] = not r["problems"]; r["page"] = pno; r["src"] = "text"
-                    d.rows += rows; d.total = total if total is not None else d.total
-                    if err: d.notes.append(f"{pno+1}ページ: {err}")
-                else:
-                    pm = page.get_pixmap(dpi=200)
-                    im = Image.open(io.BytesIO(pm.tobytes("png"))).convert("RGB")
-                    d.pages.append((im, 1.0)); d.kind = "スキャンPDF" if scanned else "画像PDF"
-                    d.src = "ocr"
-                    extra = None
-                    if tsegs:  # スキャンに付いた文字層は、信用せず、3つ目の読み取りとして使う(食い違えば要確認)
-                        sc = 200 / 72
-                        ts = [Seg([(c[0], c[1] * sc, c[2] * sc) for c in s.chars], s.y0 * sc, s.y1 * sc) for s in tsegs]
-                        extra = parse_rows(group_lines(ts))[0]
-                        for r in extra: r["exact"] = True; r["problems"] = []
-                    scan_ocr(d, im, pno, extra)
+                if pno >= MAX_PAGES:
+                    d.notes.append(f"ページが多いので、先頭{MAX_PAGES}ページだけ読みました(残り{npages - MAX_PAGES}ページは読んでいません。目視で確認してください)")
+                    break
+                try:
+                    scanned = is_scanned_page(page)
+                    tsegs = text_segs_of_page(page)
+                    if not scanned and tsegs:
+                        pm = page.get_pixmap(dpi=110)
+                        d.pages.append((PageImg(png=pm.tobytes("png"), size=(pm.width, pm.height)), page_scale_dpi(110)))
+                        d.kind = "文字入りPDF"
+                        lines = group_lines(tsegs); d.text += " ".join(l["text"] for l in lines) + "\n"
+                        rows, total, err = parse_rows(lines)
+                        for r in rows: r["exact"] = not r["problems"]; r["page"] = pno; r["src"] = "text"
+                        d.rows += rows; d.total = total if total is not None else d.total
+                        if err: d.notes.append(f"{pno+1}ページ: {err}")
+                    else:
+                        pm = page.get_pixmap(dpi=200)
+                        im = Image.open(io.BytesIO(pm.tobytes("png"))).convert("RGB")
+                        del pm
+                        d.kind = "スキャンPDF" if scanned else "画像PDF"
+                        d.src = "ocr"
+                        extra = None
+                        if tsegs:  # スキャンに付いた文字層は、信用せず、3つ目の読み取りとして使う(食い違えば要確認)
+                            sc = 200 / 72
+                            ts = [Seg([(c[0], c[1] * sc, c[2] * sc) for c in s_.chars], s_.y0 * sc, s_.y1 * sc) for s_ in tsegs]
+                            extra = parse_rows(group_lines(ts))[0]
+                            for r in extra: r["exact"] = True; r["problems"] = []
+                        scan_ocr(d, im, pno, extra)
+                        d.pages.append((PageImg(im), 1.0))   # 読み終えたページは、圧縮して持つ(メモリ節約)
+                        del im
+                except Exception as e:   # 1ページの失敗で、書類全体を捨てない。そのページは、要確認に回す
+                    d.notes.append(f"{pno+1}ページ: 読み込みに失敗: {type(e).__name__}: {e}")
+                    log(f"ページ失敗: {d.name} p{pno+1} {type(e).__name__}: {e}")
+                if pno % 5 == 4: gc.collect()
         elif ext in (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"):
-            im = Image.open(path).convert("RGB"); d.pages = [(im, 1.0)]; d.kind = "画像"; d.src = "ocr"
+            from PIL import ImageOps
+            im = Image.open(path)
+            try: im = ImageOps.exif_transpose(im)   # スマホ写真の向きを直す
+            except Exception: pass
+            im = im.convert("RGB")
+            if max(im.size) > MAX_SIDE:   # 大きすぎる写真は縮める(メモリと時間の節約)
+                r = MAX_SIDE / max(im.size); im = im.resize((int(im.width * r), int(im.height * r)), Image.LANCZOS)
+                d.notes.append("画像が大きいので、縮めて読みました(細かい文字は、目視で確認してください)")
+            d.kind = "画像"; d.src = "ocr"
             scan_ocr(d, im, 0, None)
+            d.pages = [(PageImg(im), 1.0)]
         else:
             d.notes.append("対応していない形式")
     except Exception as e:
         d.notes.append(f"読み込みに失敗: {e}")
+        log(f"読み込み失敗: {d.name} {type(e).__name__}: {e}")
     d.seconds = time.time() - t0
+    gc.collect()
+    log(f"読み終わり: {d.name} {d.seconds:.0f}秒 行{len(d.rows)} 空き{avail_mb()}MB")
     return d
 
 
