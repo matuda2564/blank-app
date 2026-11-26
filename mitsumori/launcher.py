@@ -164,7 +164,7 @@ def smoke(outpath):
         up("qq", 1, "客先見積", "c.pdf", pdf("御見積書", A)); up("qq", 1, "仕入先見積", "s.pdf", pdf("お見積書", B))
         call("/api/run?mode=qq&qty=0", "POST", b""); j = wait()
         r = call("/api/result")[1]; c3 = r["result"]["vendors"][0]["count"] if r.get("result") else {}
-        chk("見積⇔見積: 単価・合計が違っても、型式の違い(2件)だけを出す", j["status"] == "done" and c3.get("DIFF") == 2 and c3.get("OK") == 2, c3)
+        chk("見積⇔見積: 単価・合計が違っても、型番の違い(2件)だけを出す", j["status"] == "done" and c3.get("DIFF") == 2 and c3.get("OK") == 2, c3)
 
         # 3.5 見積同士を「見積⇔発注」に入れたとき、気づけて、移せる / 判断の基準が、画面から、わかる
         call("/api/reset?mode=qo", "POST", b"")

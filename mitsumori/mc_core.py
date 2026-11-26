@@ -62,6 +62,34 @@ def auto_workers(max_w=4):
     return w
 
 
+def tess_osd(im):
+    """Tesseractの向き判定(OSD)。戻り: (直すために、時計回りに回す角度, 確信度) / 判定できなければ None"""
+    try:
+        small = im.copy(); small.thumbnail((1600, 1600))
+        with tempfile.TemporaryDirectory(dir=safe_tmp_dir()) as d:
+            pth = os.path.join(d, "a.png"); small.convert("L").save(pth)
+            kw = {"creationflags": 0x08000000} if os.name == "nt" else {}
+            cp = subprocess.run([TESS_EXE, pth, "stdout", "--psm", "0"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=40, **kw)
+        m1 = re.search(r"Rotate:\s*(\d+)", cp.stdout or ""); m2 = re.search(r"Orientation confidence:\s*([\d.]+)", cp.stdout or "")
+        if not (m1 and m2): return None
+        return int(m1.group(1)) % 360, float(m2.group(2) if False else m2.group(1))
+    except Exception:
+        return None
+
+
+def best_rotation(im):
+    """スキャン・FAXの向きを、判定する。戻り: (PILで反時計回りに回す角度 0/90/180/270, 参考情報)。
+    Tesseractの向き判定を使う。回した結果を、もう一度、判定して、直ったことを確かめる(回す向きを、取り違えないため)"""
+    r = tess_osd(im)
+    if r is None: return 0, {"osd": "判定できなかった"}
+    rot, conf = r
+    if rot == 0 or conf < 2.0: return 0, {"osd": r}
+    for ang in ((360 - rot) % 360, rot):   # まず、時計回りに rot 度(=反時計回りに 360-rot 度)。確かめて、だめなら、逆
+        r2 = tess_osd(im.rotate(ang, expand=True))
+        if r2 and r2[0] == 0: return ang, {"osd": r, "after": r2}
+    return 0, {"osd": r, "after": "回しても、直らなかった"}
+
+
 class Cancelled(Exception):
     """利用者が「中止」を押した"""
 
@@ -319,6 +347,9 @@ class Doc:
         self.total = None
         self.seconds = 0.0
         self.src = "text"    # text / excel / ocr
+        self.lines = []      # 書類の全部の行 [{page,text,x0,y0,x1,y1,src}] (見積⇔見積で、型番らしい文字列を拾う元)
+        self.lines2 = []     # 画像の2つ目の読み取り(Tesseract)の行
+        self.rot = None      # スキャンの向きの補正(度)
 
 
 def page_scale_dpi(dpi):
@@ -529,6 +560,7 @@ def read_doc(path, role, cancel=None):
                         d.pages.append((PageImg(png=pm.tobytes("png"), size=(pm.width, pm.height)), page_scale_dpi(110)))
                         d.kind = "文字入りPDF"
                         lines = group_lines(tsegs); d.text += " ".join(l["text"] for l in lines) + "\n"
+                        d.lines += [{"page": pno, "text": l["text"], "x0": l["x0"], "y0": l["y0"], "x1": l["x1"], "y1": l["y1"], "src": "text"} for l in lines]
                         rows, total, err = parse_rows(lines)
                         for r in rows: r["exact"] = not r["problems"]; r["page"] = pno; r["src"] = "text"
                         d.rows += rows; d.total = total if total is not None else d.total
@@ -537,10 +569,14 @@ def read_doc(path, role, cancel=None):
                         pm = page.get_pixmap(dpi=200)
                         im = Image.open(io.BytesIO(pm.tobytes("png"))).convert("RGB")
                         del pm
+                        if getattr(d, "rot", None) is None:   # 向きは、最初のスキャンページで決めて、全ページに使う
+                            d.rot, sc_ = best_rotation(im)
+                            if d.rot: d.notes.append(f"画像が、{d.rot}度、傾いていたので、向きを直して読みました"); log(f"向きを補正: {d.name} {d.rot}度 {sc_}")
+                        if d.rot: im = im.rotate(d.rot, expand=True)
                         d.kind = "スキャンPDF" if scanned else "画像PDF"
                         d.src = "ocr"
                         extra = None
-                        if tsegs:  # スキャンに付いた文字層は、信用せず、3つ目の読み取りとして使う(食い違えば要確認)
+                        if tsegs and not d.rot:  # スキャンに付いた文字層は、信用せず、3つ目の読み取りとして使う(食い違えば要確認)
                             sc = 200 / 72
                             ts = [Seg([(c[0], c[1] * sc, c[2] * sc) for c in s_.chars], s_.y0 * sc, s_.y1 * sc) for s_ in tsegs]
                             extra = parse_rows(group_lines(ts))[0]
@@ -561,6 +597,9 @@ def read_doc(path, role, cancel=None):
             if max(im.size) > MAX_SIDE:   # 大きすぎる写真は縮める(メモリと時間の節約)
                 r = MAX_SIDE / max(im.size); im = im.resize((int(im.width * r), int(im.height * r)), Image.LANCZOS)
                 d.notes.append("画像が大きいので、縮めて読みました(細かい文字は、目視で確認してください)")
+            d.rot, sc_ = best_rotation(im)
+            if d.rot:
+                im = im.rotate(d.rot, expand=True); d.notes.append(f"画像が、{d.rot}度、傾いていたので、向きを直して読みました"); log(f"向きを補正: {d.name} {d.rot}度 {sc_}")
             d.kind = "画像"; d.src = "ocr"
             scan_ocr(d, im, 0, None)
             d.pages = [(PageImg(im), 1.0)]
@@ -580,6 +619,8 @@ def read_doc(path, role, cancel=None):
 def scan_ocr(d, im, pno, extra):
     sa, sb = ocr_rapid(im), ocr_tess(im)
     la, lb = group_lines(sa), group_lines(sb)
+    d.lines += [{"page": pno, "text": l["text"], "x0": l["x0"], "y0": l["y0"], "x1": l["x1"], "y1": l["y1"], "src": "ocr"} for l in la]
+    d.lines2 += [{"page": pno, "text": l["text"], "x0": l["x0"], "y0": l["y0"], "x1": l["x1"], "y1": l["y1"], "src": "ocr"} for l in lb]
     if sa and not sb:
         d.notes.append(f"{pno+1}ページ: 2つ目の読み取り(Tesseract)が動かなかった。確実とは言えないので、全部、人が確認してください")
     d.text += " ".join(l["text"] for l in la) + "\n"
@@ -611,6 +652,7 @@ def read_excel(d):
             d.notes.append("行が多すぎるので、先頭5,000行だけ読みました(残りは読んでいません。目視で確認してください)"); break
         grid.append([("" if c is None else str(c)) for c in row])
     d.text = "\n".join(" ".join(r) for r in grid)
+    d.lines = [{"page": 0, "text": " ".join(r), "src": "excel"} for r in grid if any(r)]
     hi = None
     for i, r in enumerate(grid):
         t = norm("".join(r))
@@ -783,61 +825,116 @@ def compare(q, o):
     return res, [JP[k] for k in ["model", "qty"] + both], skipped
 
 
+# ------------------------------------------------------------------ 型番らしい文字列を、書類全体から拾う(見積 ⇔ 見積用)
+_UNIT_RE = re.compile(r"^\d+(MM|CM|KG|ML|HZ|PCS|[MGLVAW])$")
+
+
+def model_tokens(text):
+    """1行の文字から、型番らしい文字列を拾う。英字と数字が混ざり、4文字以上。例: B9565AW-T / AW20-02BE-D / KQ2H06-M5。
+    電話・FAX・インボイス番号・単位つきの数字(100V, 10KG など)は、型番ではないので、拾わない"""
+    t = unicodedata.normalize("NFKC", text or "")
+    for d_ in DASH: t = t.replace(d_, "-")
+    out = []
+    for m in re.finditer(r"[A-Za-z0-9][A-Za-z0-9\-\./]*", t):
+        tok = m.group(0).strip("-./"); u = tok.upper(); k = re.sub(r"[^A-Z0-9]", "", u)
+        if len(k) < 4 or not re.search(r"[A-Z]", k) or not re.search(r"\d", k): continue
+        if u.startswith(("TEL", "FAX", "NO.", "WWW.", "HTTP")) or "@" in u: continue
+        if re.fullmatch(r"T\d{13}", k) or re.fullmatch(r"T?\d{7}", k) or _UNIT_RE.match(k): continue   # インボイス登録番号・郵便番号(〒がTに化ける)・単位つきの数字
+        out.append(tok)
+    return out
+
+
+def tkey(tok):
+    return re.sub(r"[^A-Z0-9]", "", tok.upper())
+
+
+def doc_tokens(d):
+    """{照合用の鍵: {raw, line, sure}}。
+    文字入りPDF・Excel: 見つかった型番は、全部「確実」。
+    画像: 2種類の読み取り(RapidOCR と Tesseract)の、どちらかで見つかった型番を候補にする(片方が読み落としても、拾えるように)。
+          両方で見つかった型番だけを「確実」とし、片方でしか見つからないものは、「確実でない」(必ず人が見る)とする"""
+    def collect(lines):
+        out = {}
+        for L in lines:
+            for tok in model_tokens(L["text"]):
+                k = tkey(tok)
+                if k not in out: out[k] = {"raw": tok, "line": L}
+        return out
+    m1 = collect(d.lines)
+    if d.src != "ocr":
+        return {k: {"raw": v["raw"], "line": v["line"], "sure": True, "noise": False} for k, v in m1.items()}
+    m2 = collect(d.lines2)
+    res = {}
+    def glued(long_k, short_k):   # 「XYZ-100A 5本入」を「XYZ-100A5本入」と、くっつけて読んだ型(末尾に、数字が1〜2桁、余分についた)
+        return len(short_k) >= 5 and long_k.startswith(short_k) and 1 <= len(long_k) - len(short_k) <= 2 and long_k[len(short_k):].isdigit()
+    for k in set(m1) | set(m2):
+        src = m1.get(k) or m2.get(k)
+        sure = (k in m1 and k in m2)
+        raw = src["raw"]
+        # 画像の読み取りが、片方でしか見つからず、ハイフンがない・小文字が混ざる・長すぎる → 文字の読み間違い(ゴミ)の可能性が高い
+        noise = (not sure) and (("-" not in raw) or any(c.islower() for c in raw) or len(k) > 20)
+        res[k] = {"raw": raw, "line": src["line"], "sure": sure, "noise": noise}
+    for k in list(res):
+        for k2 in list(res):
+            if k != k2 and k in res and k2 in res and glued(k2, k):
+                other = (k2 in m1 and k in m2 and k2 not in m2 and k not in m1) or (k2 in m2 and k in m1 and k2 not in m1 and k not in m2)
+                if other:   # 別々の読み取りが、同じ型番(の、くっつき違い)を読んでいる → 短い方に、まとめて、確実とする
+                    res[k]["sure"] = True; res[k]["noise"] = False; del res[k2]
+    return res
+
+
+def _tok_row(d, k, v):
+    L = v["line"]
+    r = {"model_raw": v["raw"], "model": k, "raw": L["text"], "name": L["text"], "page": L["page"], "src": L["src"], "exact": v["sure"], "problems": []}
+    if "x0" in L: r.update(x0=L["x0"], y0=L["y0"], x1=L["x1"], y1=L["y1"])
+    return r
+
+
 def compare_qq(a, b, with_qty=False):
-    """見積同士を比べる(a=客先に出した見積 / b=仕入先の見積)。型式と品名だけを比べる。
-    単価・金額・合計・納期・単位は、違って当たり前なので、比べない。数量は、選んだときだけ比べる。
-    「確実」と言い切れる行だけ OK を出す。自信がない行・違う点がある行は、必ず人に見せる(黙って通さない)。"""
+    """見積同士を比べる(a=客先に出した見積 / b=仕入先の見積)。
+    書類の形(表の列の分け方)に頼らず、書類全体の文字から、型番らしい文字列を拾って、比べる。
+    品名・数量・単価・金額・合計・納期・単位は、書類ごとに違って当たり前なので、比べない。
+    「確実」と言い切れる型番だけ OK を出す。自信がない・近い型番・片方にしかない型番は、必ず人に見せる(黙って通さない)。"""
     res = []
-    amap, bmap = {}, {}
-    for r in a.rows: amap.setdefault(r["model"], []).append(r)
-    for r in b.rows: bmap.setdefault(r["model"], []).append(r)
-
-    def sure(r):   # 文字入りPDF・Excelは、型式の読み間違いが起きない。画像は、2種類の読み取りが一致したときだけ確実
-        return True if r.get("src") != "ocr" else bool(r.get("exact"))
-
-    for mp, side in ((amap, "q"), (bmap, "o")):
-        for m, rs in mp.items():
-            if len(rs) > 1:
-                for r in rs:
-                    res.append({"status": "REVIEW", "model": r["model_raw"], "msg": "同じ型式が複数行ある(自動では照合しない)", "qrow": r if side == "q" else None, "orow": r if side == "o" else None})
-    use_name = any(r.get("name") for r in a.rows) and any(r.get("name") for r in b.rows)
-    for m in sorted(set(amap) | set(bmap)):
-        if len(amap.get(m, [])) > 1 or len(bmap.get(m, [])) > 1:
-            continue
-        x = amap.get(m, [None])[0]; y = bmap.get(m, [None])[0]
+    ta, tb = doc_tokens(a), doc_tokens(b)
+    ign = {"q": [], "o": []}
+    def _similar(k, other): return k in other or any(lev(k, kk) <= 2 for kk in other)
+    for side, tk, ot in (("q", ta, tb), ("o", tb, ta)):   # ゴミの疑いが強く、相手の書類に似たものもない文字列は、1行ずつは出さない
+        for k in list(tk):
+            if tk[k].get("noise") and not _similar(k, ot):
+                ign[side].append(tk[k]["raw"]); del tk[k]
+    for k in sorted(set(ta) | set(tb)):
+        x, y = ta.get(k), tb.get(k)
         if x and y:
-            ocr = x.get("src") == "ocr" or y.get("src") == "ocr"
-            diffs = []
-            if use_name and x.get("name") and y.get("name") and norm(x["name"]) != norm(y["name"]):
-                diffs.append(f"品名: 客先「{x['name']}」⇔ 仕入先「{y['name']}」")
-            if with_qty and x.get("qty") != y.get("qty"):
-                diffs.append(f"数量: 客先「{x.get('qty')}」⇔ 仕入先「{y.get('qty')}」")
-            if diffs:
-                qty_only = all(d.startswith("数量") for d in diffs)
-                st = "DIFF" if (qty_only and sure(x) and sure(y)) else "REVIEW"
-                res.append({"status": st, "model": x["model_raw"], "msg": "型式は同じで、違う点がある: " + " / ".join(diffs) + ("" if st == "DIFF" else "(確認してください)"), "qrow": x, "orow": y})
-            elif not (sure(x) and sure(y)):
-                res.append({"status": "REVIEW", "model": x["model_raw"], "msg": "型式は一致して見えるが、読み取りが確実でない(他の読み取りと食い違う)", "qrow": x, "orow": y})
+            ocr = a.src == "ocr" or b.src == "ocr"
+            ra, rb = _tok_row(a, k, x), _tok_row(b, k, y)
+            if x["sure"] and y["sure"]:
+                res.append({"status": "OK_IMG" if ocr else "OK", "model": x["raw"], "msg": "", "qrow": ra, "orow": rb})
             else:
-                res.append({"status": "OK_IMG" if ocr else "OK", "model": x["model_raw"], "msg": "", "qrow": x, "orow": y})
+                res.append({"status": "REVIEW", "model": x["raw"], "msg": "型番は一致して見えるが、画像の読み取りが確実でない(2種類の読み取りの片方でしか、見つからなかった)", "qrow": ra, "orow": rb})
         else:
-            one = x or y
-            other = bmap if x else amap
-            near = [k for k in other if lev(m, k) <= 2]
+            one_doc, one_tok, other = (a, x, tb) if x else (b, y, ta)
             where = "客先の見積にだけある" if x else "仕入先の見積にだけある"
+            near = [kk for kk in other if lev(k, kk) <= 2]
+            row = _tok_row(one_doc, k, one_tok)
+            qr, orr = (row, None) if x else (None, row)
             if near:
-                res.append({"status": "REVIEW", "model": one["model_raw"], "msg": f"{where}型式。近い型式: {', '.join(other[k][0]['model_raw'] for k in near)}(1〜2文字の違い。見間違いか、本当の違いか、確認してください)", "qrow": x, "orow": y})
+                gl = [kk for kk in near if (k.startswith(kk) and k[len(kk):].isdigit()) or (kk.startswith(k) and kk[len(k):].isdigit())]
+                hint = "(型番の後ろに、数量や規格の数字が、くっついて読めた可能性があります。例: 「B9565AW-T 10冊入」→「B9565AW-T10」。画像を見て、確認してください)" if gl else "(1〜2文字の違い。見間違いか、本当の違いか、確認してください)"
+                res.append({"status": "REVIEW", "model": one_tok["raw"], "msg": f"{where}型番。近い型番: {', '.join(other[kk]['raw'] for kk in near)}{hint}", "qrow": qr, "orow": orr})
             else:
-                st = "DIFF" if sure(one) else "REVIEW"
-                res.append({"status": st, "model": one["model_raw"], "msg": f"{where}型式" + ("" if st == "DIFF" else "(読み取りが確実でないので、断定しない)"), "qrow": x, "orow": y})
-    for d, nm in ((a, "客先見積"), (b, "仕入先見積")):
-        notes = [n for n in d.notes if "合計を読めなかった" not in n]   # 合計は使わないので、読めなくてよい
-        if not d.rows:
-            res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}書から明細行を1行も読めなかった: " + " / ".join(notes or ["原因不明"]), "qrow": None, "orow": None, "doc": "q" if nm == "客先見積" else "o"})
+                st = "DIFF" if one_tok["sure"] else "REVIEW"
+                res.append({"status": st, "model": one_tok["raw"], "msg": f"{where}型番" + ("" if st == "DIFF" else "(画像の読み取りが確実でないので、断定しない)"), "qrow": qr, "orow": orr})
+    for d, tk, nm, sd in ((a, ta, "客先見積", "q"), (b, tb, "仕入先見積", "o")):
+        if ign[sd]:
+            ex = "、".join(ign[sd][:4]) + ("…" if len(ign[sd]) > 4 else "")
+            res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}: 画像から、型番かどうか判断できない文字列を、{len(ign[sd])}個、読み取りましたが、無視しています(例: {ex})。画像の汚れによる読み間違いの可能性が高いものです。型番が、ほかにないか、画像を見て確認してください(「読み取った中身を見る」に、全部あります)", "qrow": None, "orow": None, "doc": sd})
+        notes = [n for n in d.notes if "合計を読めなかった" not in n and "見出しを読めない" not in n and "見出し行が見つからない" not in n]   # 型番を拾うのに、表の見出しは、要らない
+        if not tk:
+            res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}書から、型番らしい文字列を、1つも見つけられなかった(英字と数字が混ざった4文字以上の文字列を探しています)。" + (" / ".join(notes) if notes else ""), "qrow": None, "orow": None, "doc": "q" if nm == "客先見積" else "o"})
         elif notes:
             res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}: " + " / ".join(notes), "qrow": None, "orow": None, "doc": "q" if nm == "客先見積" else "o"})
-    compared = ["型式"] + (["品名"] if use_name else []) + (["数量"] if with_qty else [])
-    return res, compared, []
+    return res, ["型番(英字と数字の文字列)"], []
 
 
 # ------------------------------------------------------------------ 根拠の画像
@@ -910,14 +1007,34 @@ def read_many(jobs, workers=4, progress=None, cancel=None):
 
 
 ROLES_BY_MODE = {"qo": ("見積", "発注"), "qq": ("客先見積", "仕入先見積")}   # qo=見積⇔発注 / qq=見積⇔見積(客先と仕入先)
-SKIPNOTE_QQ = "単価・金額・合計・納期・単位(違って当たり前なので、比べません)"
+SKIPNOTE_QQ = "品名・数量・単価・金額・合計・納期・単位(書類ごとに違って当たり前なので、比べません)"
 
 
-def doc_info(d):
+def doc_info(d, mode="qo"):
     """画面に出す『ツールが、この書類から、何を読んだか』(判断の基準が、見えるように)"""
     if d is None: return None
-    return {"name": d.name, "kind": d.kind, "notes": d.notes[:6],
+    if mode == "qq":
+        tk = doc_tokens(d)
+        return {"name": d.name, "kind": d.kind, "notes": d.notes[:6], "mode": "qq", "nlines": len(d.lines),
+                "rows": [{"m": v["raw"], "n": v["line"]["text"][:90], "q": None, "sure": v["sure"], "noise": bool(v.get("noise"))} for v in list(tk.values())[:300]]}
+    return {"name": d.name, "kind": d.kind, "notes": d.notes[:6], "mode": "qo",
             "rows": [{"m": r.get("model_raw"), "n": r.get("name"), "q": r.get("qty")} for r in d.rows[:300]]}
+
+
+def pair_docs_qq(A, B):
+    """見積⇔見積: 型番の重なりで、組を決める(客先の見積は、仕入先の見積より、品目が多いことがあるので、基準を、やや低くする)"""
+    pairs, used = [], set()
+    for b in B:
+        kb = list(doc_tokens(b))
+        cand = sorted(((jaccard(list(doc_tokens(a)), kb), i) for i, a in enumerate(A) if i not in used), reverse=True)
+        if cand and cand[0][0] >= 0.3 and (len(cand) == 1 or cand[0][0] - cand[1][0] >= 0.15):
+            used.add(cand[0][1]); pairs.append((A[cand[0][1]], b, f"型番の重なり {cand[0][0]:.0%}"))
+        else:
+            best = f"{cand[0][0]:.0%}" if cand else "0%"
+            pairs.append((None, b, f"相手が決まらない。型番の重なりが最大でも {best}(組にする基準は、30%以上で、2番目より15ポイント以上高いこと)"))
+    for i, a in enumerate(A):
+        if i not in used: pairs.append((a, None, "対応する仕入先の見積がない"))
+    return pairs
 
 
 def run_vendor(vdir, workers=4, progress=None, name=None, mode="qo", with_qty=False, cancel=None):
@@ -944,9 +1061,10 @@ def run_vendor(vdir, workers=4, progress=None, name=None, mode="qo", with_qty=Fa
     if mode == "qq" and len(A) == 1 and len(B) == 1:
         pairs = [(A[0], B[0], "1対1で、そのまま組にした")]   # 見積番号が違うのが普通なので、1枚ずつなら、迷わず組にする
     else:
-        pairs = pair_docs(A, B)
+        pairs = pair_docs_qq(A, B) if mode == "qq" else pair_docs(A, B)
     for q, o, why in pairs:
         item = {"q": q, "o": o, "why": why, "results": [], "compared": [], "skipped": []}
+        item["mode"] = mode
         if mode == "qq": item["skipnote"] = SKIPNOTE_QQ
         if q and o:
             if mode == "qq": item["results"], item["compared"], item["skipped"] = compare_qq(q, o, with_qty)

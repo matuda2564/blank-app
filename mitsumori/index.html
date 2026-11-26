@@ -61,7 +61,7 @@ button.sm.pri{background:var(--pri);color:#fff}
 <nav class="tabs"><button id="tab-qo" class="on">見積 ⇔ 発注</button><button id="tab-qq">見積 ⇔ 見積(客先に出した見積 と 仕入先の見積)</button></nav>
 <main>
 <div class="note" id="note-qq" hidden>
-<b>使い方</b>: ①社ごとの枠に、<b>客先に出した見積書</b>と<b>仕入先の見積書</b>を入れる(ドラッグ、またはクリックして選ぶ。PDF・Excel・画像) → ②<b>「照合する」</b> → ③結果を上から確認 → ④終わったら<b>「この社をリセット」</b>で次の社へ。<br>比べるのは、<b>型式</b>と<b>品名</b>だけです。<b>単価・金額・合計・納期・単位は、違って当たり前なので、比べません</b>。数量は、下のチェックを入れたときだけ比べます。<br><b>✅ 型式が一致</b> / <b>❌ 片方にだけある型式</b> / <b>⚠ 要確認</b>=近い型式(1〜2文字の違い)・品名の違い・読み取りに自信がない。<b>✅以外は、必ず人が見てください。</b>画像の書類は、似た文字(0とO、1とI)の読み違いを、完全には防げません。
+<b>使い方</b>: ①社ごとの枠に、<b>客先に出した見積書</b>と<b>仕入先の見積書</b>を入れる(ドラッグ、またはクリックして選ぶ。PDF・Excel・画像) → ②<b>「照合する」</b> → ③結果を上から確認 → ④終わったら<b>「この社をリセット」</b>で次の社へ。<br>書類の中から、<b>型番らしい文字列</b>(英字と数字が混ざった4文字以上。例: B9565AW-T)を拾って、<b>2枚の間で、同じか、違うか</b>を見ます。表の形は、問いません(品名の欄の中に、型番が入っていても、拾います)。<b>品名・数量・単価・金額・合計・納期・単位は、書類ごとに違って当たり前なので、比べません</b>。<br><b>✅ 型番が一致</b> / <b>❌ 片方にだけある型番</b> / <b>⚠ 要確認</b>=近い型番(1〜2文字の違い)・画像の読み取りに自信がない。<b>✅以外は、必ず人が見てください。</b>画像の書類は、似た文字(0とO、1とI)の読み違いを、完全には防げません。
 </div>
 <div class="note" id="note-qo">
 <b>使い方</b>: ①社ごとの枠に、<b>見積書</b>と<b>発注書</b>を入れる(ドラッグ、またはクリックして選ぶ。PDF・Excel・画像) → ②<b>「照合する」</b> → ③結果を上から確認 → ④終わったら<b>「全部リセット」</b>。<br>
@@ -70,9 +70,9 @@ button.sm.pri{background:var(--pri);color:#fff}
 <div class="opt" id="qtyrow" hidden><label><input type="checkbox" id="qty"> 数量も比べる</label> <small>(チェックなし=型式と品名だけ)</small></div>
 <details class="note" id="criteria"><summary><b>どういう基準で、判断していますか?</b>(クリックで開く)</summary>
 <p><b>① 書類の読み方</b>: 文字入りのPDFとExcelは、書いてある文字を、そのまま読みます。スキャン・写真は、2種類の読み取り(RapidOCR と Tesseract)で読み、<b>2つが一致した行だけ</b>「確実」とします。表の「見出し」(型式・数量・単価・金額など)の位置で、列を分けます。結果の下の「読み取った中身を見る」で、<b>何を読んだか</b>を確認できます。</p>
-<p><b>② 組の決め方</b>(見積 ⇔ 発注): 見積番号が同じなら組にします。番号がないときは、<b>型式の重なりが50%以上</b>で、2番目の候補より20ポイント以上高いときだけ組にします。決まらなければ「組みにならなかった」と出します。<br>(見積 ⇔ 見積): 客先1枚・仕入先1枚なら、そのまま組にします。複数あるときは、同じ基準で決めます。</p>
+<p><b>② 組の決め方</b>(見積 ⇔ 発注): 見積番号が同じなら組にします。番号がないときは、<b>型式の重なりが50%以上</b>で、2番目の候補より20ポイント以上高いときだけ組にします。決まらなければ「組みにならなかった」と出します。<br>(見積 ⇔ 見積): 客先1枚・仕入先1枚なら、そのまま組にします。複数あるときは、<b>型番の重なりが30%以上</b>で、2番目より15ポイント以上高いときだけ組にします。</p>
 <p><b>③ 同じ型式の判定</b>: 全角と半角、大文字と小文字、ハイフン、空白の違いは、<b>同じ</b>とみなします。それ以外の違いは、<b>1文字でも、違う</b>とします。1〜2文字だけ違う型式は「近い型式」として、<b>要確認</b>に出します。</p>
-<p><b>④ 比べる項目</b>: 見積 ⇔ 発注は、型式・数量・単価・金額・品名・単位・納期。見積 ⇔ 見積は、<b>型式と品名だけ</b>(数量は、チェックを入れたときだけ)。単価・金額・合計は、比べません。</p>
+<p><b>④ 比べる項目</b>: 見積 ⇔ 発注は、型式・数量・単価・金額・品名・単位・納期。見積 ⇔ 見積は、<b>型番らしい文字列だけ</b>(書類全体の文字から、英字と数字が混ざった4文字以上の文字列を拾います。電話番号・インボイス番号・「100V」のような単位つきの数字は、拾いません)。品名・数量・単価・金額・合計は、比べません。画像の書類は、<b>2種類の読み取りの両方で見つかった型番だけ</b>を「確実」とし、片方だけなら「要確認」に出します。</p>
 <p><b>⑤ 結果の意味</b>: ✅=文字入りPDF・Excelで、全項目が一致 / ☑=画像で、2種類の読み取りが一致(目で確認) / ❌=違いがある(はっきり読めている) / ⚠=読み取りに自信がない・近い型式・品名の違いなど。<b>✅以外は、必ず人が見てください。</b></p>
 </details>
 <div class="slots" id="slots"></div>
@@ -170,7 +170,7 @@ async function showResult(){
  $('out').innerHTML=h;$('save').style.display='';todo();
 }
 function readPanel(p){
- const one=(lab,d)=>d?`<div><b>${esc(lab)}「${esc(d.name)}」</b> <small>(${esc(d.kind||'種類不明')}・${d.rows.length}行を読み取り)</small>${d.rows.length?`<table class="rd"><tr><th>型式(読んだまま)</th><th>品名</th><th>数量</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.m)}</td><td>${esc(r.n||'')}</td><td>${esc(r.q==null?'':r.q)}</td></tr>`).join('')}</table>`:'<div class="warn">明細の行を、1行も読めませんでした</div>'}${d.notes.length?`<div class="meta">注意: ${esc(d.notes.join(' / '))}</div>`:''}</div>`:'';
+ const one=(lab,d)=>d?`<div><b>${esc(lab)}「${esc(d.name)}」</b> <small>(${esc(d.kind||'種類不明')}・${d.mode==='qq'?d.rows.length+'個の型番を発見':d.rows.length+'行を読み取り'})</small>${d.mode==='qq'?(d.rows.length?`<table class="rd"><tr><th>見つけた型番</th><th>その行の文字</th><th>確実?</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.m)}</td><td>${esc(r.n||'')}</td><td>${r.sure?'○':(r.noise?'ゴミの疑い(無視)':'要確認')}</td></tr>`).join('')}</table>`:`<div class="warn">型番らしい文字列を、1つも見つけられませんでした(読み取った行: ${d.nlines}行)</div>`):(d.rows.length?`<table class="rd"><tr><th>型式(読んだまま)</th><th>品名</th><th>数量</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.m)}</td><td>${esc(r.n||'')}</td><td>${esc(r.q==null?'':r.q)}</td></tr>`).join('')}</table>`:'<div class="warn">明細の行を、1行も読めませんでした</div>')}${d.notes.length?`<div class="meta">注意: ${esc(d.notes.join(' / '))}</div>`:''}</div>`:'';
  return `<details class="rdp"><summary>読み取った中身を見る(ツールが、書類から、何を読んだか)</summary><div class="two">${one(ROLES[0],p.qread)}${one(ROLES[1],p.oread)}</div></details>`}
 function chips(c){return `<span class="chip c-ok">✅ 確実に一致 <b>${c.OK}</b></span><span class="chip c-img">☑ 画像で一致(目で確認) <b>${c.OK_IMG}</b></span><span class="chip c-ng">❌ 違い <b>${c.DIFF}</b></span><span class="chip c-rv">⚠ 要確認 <b>${c.REVIEW}</b></span><span class="chip c-np">相手なし <b>${c.NOPAIR}</b>組</span>`}
 function rowHtml(r,idx){
@@ -211,7 +211,7 @@ async function health(n){try{const h=await api('/api/health');if(h.state==='chec
 function setMode(m){
  MODE=m;ROLES=MODES[m].roles;
  $('tab-qo').classList.toggle('on',m==='qo');$('tab-qq').classList.toggle('on',m==='qq');
- $('ttl').textContent=MODES[m].title;$('note-qo').hidden=m!=='qo';$('note-qq').hidden=m!=='qq';$('qtyrow').hidden=m!=='qq';
+ $('ttl').textContent=MODES[m].title;$('note-qo').hidden=m!=='qo';$('note-qq').hidden=m!=='qq';$('qtyrow').hidden=true;
  $('out').innerHTML='';$('save').style.display='none';$('vw').hidden=true;ITEMS=[];
  try{history.replaceState(null,'','#'+m)}catch(e){}
  refresh().then(()=>{if(!ST)return;if(ST.job.status==='running')poll();else if(ST.job.status==='done'&&ST.job.mode===MODE)showResult()});
