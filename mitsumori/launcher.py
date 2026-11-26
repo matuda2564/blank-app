@@ -233,6 +233,38 @@ def smoke(outpath):
     return 0 if not ng else 1
 
 
+def find_appbrowser():
+    """Edge または Chrome を探す(Windowsには、Edgeが、必ず入っている)。専用の窓(アドレス欄・タブなし)で開くために使う"""
+    env = os.environ.get("MC_APPBROWSER")
+    if env: return env if os.path.exists(env) else None
+    pf = [os.environ.get(k) for k in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA") if os.environ.get(k)]
+    for base in pf:
+        for rel in (r"Microsoft\Edge\Application\msedge.exe", r"Google\Chrome\Application\chrome.exe"):
+            p = os.path.join(base, rel)
+            if os.path.exists(p): return p
+    return None
+
+
+def open_app_window(url, server_mod, mc_core):
+    """EdgeやChromeを、アプリ用の窓(--app)で開き、その窓が閉じられるまで待つ。戻り値: 窓を開いて、閉じられたら True / 開けなかったら False"""
+    exe = find_appbrowser()
+    if not exe: return False
+    import subprocess, tempfile
+    prof = tempfile.mkdtemp(prefix="mc_win_", dir=server_mod.WORK if os.path.isdir(server_mod.WORK) else None)   # 専用の置き場(閉じたら、このプロセスも終わる)
+    try:
+        t0 = time.time()
+        pr = subprocess.Popen([exe, f"--app={url}", f"--user-data-dir={prof}", "--window-size=1280,860", "--no-first-run", "--no-default-browser-check"])
+        mc_core.log(f"アプリ用の窓で開いた: {exe}")
+        pr.wait()
+        if time.time() - t0 < 5:   # すぐ終わった=別のプロセスに任せて終わった/開けなかった → 窓を開けた扱いにしない
+            mc_core.log("アプリ用の窓が、すぐ終わった(開けなかった可能性)"); return False
+        return True
+    except Exception:
+        mc_core.log("アプリ用の窓を開けなかった: " + traceback.format_exc()); return False
+    finally:
+        import shutil; shutil.rmtree(prof, ignore_errors=True)
+
+
 def main():
     import server, mc_core
     srv, port = server.start(0)
@@ -244,7 +276,12 @@ def main():
         webview.start()
     except Exception as e:
         reason = f"{type(e).__name__}: {e}"
-        mc_core.log("専用の窓を開けなかった(ブラウザで開く): " + traceback.format_exc())   # 黙って握りつぶさない
+        mc_core.log("専用の窓(WebView2)を開けなかった: " + traceback.format_exc())   # 黙って握りつぶさない
+        if open_app_window(url, server, mc_core):   # 次の手: Edge/Chrome を、アプリ用の窓で開く(タブ・アドレス欄なし。窓を閉じたら、終了)
+            import shutil
+            shutil.rmtree(server.WORK, ignore_errors=True)
+            return
+        mc_core.log("ブラウザで開く")
         webbrowser.open(url)
         idle = int(os.environ.get("MC_IDLE_EXIT") or 180)   # 画面(ブラウザ)が、この秒数、開かれていなければ、自動で終了する
         try:
