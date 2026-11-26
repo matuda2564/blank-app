@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """見積・発注 照合ツールの入口(.exe の中身)。裏でサーバーを起動し、専用の窓(なければブラウザ)で開く。
   --selftest <出力ファイル> : 画面を出さずに、読み取りの部品が動くか自己点検して結果をファイルへ書く(ビルド後の確認用)
+  --smoke <出力ファイル>    : 画面を出さずに、サーバーごと通しで動かす(照合・画像・見積同士・中止・リセット・保存。ビルド後の確認用)
 """
 import os, sys, threading, webbrowser, time, io, traceback
 
@@ -59,6 +60,131 @@ def selftest(outpath):
     return 0 if ok else 1
 
 
+def smoke(outpath):
+    """画面を出さずに、サーバーごと、通しで動かす(ビルド後の確認用・日本語の名前の場所でも動くか)。
+    起動 → 自己診断 → 見積⇔発注 → 画像(OCR) → 見積⇔見積 → 中止 → 非対応形式の拒否 → 作業フォルダの安全 → リセット → 結果の保存"""
+    import json, urllib.request, urllib.parse, tempfile, shutil
+    res = []
+    def chk(name, cond, info=""):
+        res.append((bool(cond), name, str(info)[:200]))
+    try:
+        import fitz
+        import server as S
+        import mc_core as C
+        srv, port = S.start(0)
+        H = {"X-MC-Token": S.TOKEN}
+        def call(path, method="GET", body=None, timeout=120):
+            req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=body, method=method, headers=H)
+            try:
+                r = urllib.request.urlopen(req, timeout=timeout); return r.status, json.loads(r.read() or b"{}")
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read() or b"{}")
+        def up(mode, slot, role, name, data):
+            return call(f"/api/upload?mode={mode}&slot={slot}&role={urllib.parse.quote(role)}&name={urllib.parse.quote(name)}", "POST", data)
+        def wait(limit=240):
+            t = time.time()
+            while time.time() - t < limit:
+                j = call("/api/state")[1]["job"]
+                if j["status"] != "running": return j
+                time.sleep(0.7)
+            return {"status": "timeout"}
+        def pdf(title, rows, scan=False):
+            d = fitz.open(); pg = d.new_page(width=595, height=842)
+            pg.insert_text((200, 70), title, fontname="japan", fontsize=20)
+            for x, h in ((60, "型式"), (200, "品名"), (330, "数量"), (390, "単価"), (470, "金額")): pg.insert_text((x, 150), h, fontname="japan", fontsize=11)
+            y = 176; tot = 0
+            for m, n, q, pr in rows:
+                pg.insert_text((60, y), m, fontname="helv", fontsize=11); pg.insert_text((200, y), n, fontname="japan", fontsize=11)
+                pg.insert_text((330, y), str(q), fontname="helv", fontsize=11); pg.insert_text((390, y), f"{pr:,}", fontname="helv", fontsize=11)
+                pg.insert_text((470, y), f"{q*pr:,}", fontname="helv", fontsize=11); tot += q * pr; y += 26
+            pg.insert_text((390, y + 10), "合計", fontname="japan", fontsize=11); pg.insert_text((470, y + 10), f"{tot:,}", fontname="helv", fontsize=11)
+            if scan:
+                return pg.get_pixmap(dpi=170).tobytes("png")
+            return d.tobytes()
+        A = [("AW20-02BE-D", "フィルタ", 3, 12000), ("KQ2H06-M5", "継手", 10, 450), ("TJ-800", "アダプタ", 2, 3000)]
+        B = [("AW20-02BE-D", "フィルタ", 3, 9800), ("KQ2H06-M5", "継手", 10, 300), ("XT-2200", "リレー", 5, 700)]
+
+        # 0 自己診断
+        for _ in range(60):
+            h = call("/api/health")[1]
+            if h.get("state") == "done": break
+            time.sleep(1)
+        chk("起動時の自己診断(RapidOCR と Tesseract が動く)", h.get("ok"), h)
+        chk("作業フォルダが、このアプリ専用の場所", os.path.basename(S.WORK).startswith("run_"), S.WORK)
+        chk("一時フォルダが、英数字だけの場所", C.safe_tmp_dir().isascii(), C.safe_tmp_dir())
+
+        # 1 見積⇔発注(文字入りPDF)
+        up("qo", 1, "見積", "q1.pdf", pdf("御見積書", A)); up("qo", 1, "発注", "o1.pdf", pdf("注文書", A))
+        call("/api/run?mode=qo", "POST", b""); j = wait()
+        r = call("/api/result")[1]
+        cnt = r["result"]["vendors"][0]["count"] if r.get("result") else {}
+        chk("見積⇔発注: 文字入りPDFが、3行とも「確実に一致」", j["status"] == "done" and cnt.get("OK") == 3, cnt)
+
+        # 2 同じ画面で、次の社へ(「1回しか使えない」の再発防止)
+        up("qo", 2, "見積", "q2.png", pdf("御見積書", A, scan=True)); st, _x = up("qo", 2, "発注", "o2.png", pdf("注文書", A, scan=True))
+        chk("照合のあと、B社にも、書類を入れられる", st == 200, st)
+        call("/api/run?mode=qo", "POST", b""); j = wait()
+        r = call("/api/result")[1]
+        v2 = [v for v in r["result"]["vendors"] if v["vendor"] == "B社"]
+        c2 = v2[0]["count"] if v2 else {}
+        chk("見積⇔発注: 画像(OCR)が、動いて、結果が出る(要確認でも、落ちない)", j["status"] == "done" and sum(c2.values()) >= 3, c2)
+        chk("画像(OCR)で、1行以上は、確実に一致", (c2.get("OK_IMG", 0) + c2.get("OK", 0)) >= 1, c2)
+
+        # 3 見積⇔見積
+        up("qq", 1, "客先見積", "c.pdf", pdf("御見積書", A)); up("qq", 1, "仕入先見積", "s.pdf", pdf("お見積書", B))
+        call("/api/run?mode=qq&qty=0", "POST", b""); j = wait()
+        r = call("/api/result")[1]; c3 = r["result"]["vendors"][0]["count"] if r.get("result") else {}
+        chk("見積⇔見積: 単価・合計が違っても、型式の違い(2件)だけを出す", j["status"] == "done" and c3.get("DIFF") == 2 and c3.get("OK") == 2, c3)
+
+        # 4 中止(止まったときの、逃げ道)
+        call("/api/reset?mode=qo", "POST", b""); call("/api/reset?mode=qq", "POST", b"")
+        d = fitz.open()
+        for k in range(14):
+            pg = d.new_page(width=595, height=842); pg.insert_text((100, 100 + k), "型式 数量 単価 金額", fontname="japan", fontsize=12)
+        big = fitz.open()
+        for pg in d:
+            im = pg.get_pixmap(dpi=150).tobytes("png"); n = big.new_page(width=595, height=842); n.insert_image(n.rect, stream=im)
+        up("qo", 3, "見積", "big.pdf", big.tobytes()); up("qo", 3, "発注", "big2.pdf", big.tobytes())
+        call("/api/run?mode=qo", "POST", b""); time.sleep(3)
+        chk("読み取り中は、状態が running", call("/api/state")[1]["job"]["status"] == "running")
+        t = time.time(); call("/api/cancel", "POST", b""); st2 = call("/api/state")[1]["job"]["status"]
+        chk("「中止」で、すぐに、元の状態(idle)に戻る", st2 == "idle" and time.time() - t < 5, st2)
+        st3, _x = up("qo", 3, "見積", "again.pdf", pdf("御見積書", A))
+        chk("中止のあと、また、書類を入れられる", st3 == 200, st3)
+        time.sleep(8)   # 中止した古い仕事が、あとから、状態を壊さない
+        chk("中止した古い仕事が、あとから、状態を上書きしない", call("/api/state")[1]["job"]["status"] == "idle", call("/api/state")[1]["job"])
+
+        # 5 対応していない形式・空のファイル
+        s1, m1 = up("qo", 4, "見積", "old.xls", b"x" * 100); s2, m2 = up("qo", 4, "見積", "empty.pdf", b"")
+        chk("対応していない形式(.xls)は、理由つきで断る", s1 == 400 and "xlsx" in m1.get("error", ""), m1)
+        chk("空のファイルは、理由つきで断る", s2 == 400, m2)
+
+        # 6 作業フォルダの安全(2つ開いても、片方が、もう片方の書類を消さない)
+        dead = os.path.join(S.WORK_BASE, "run_99999999"); os.makedirs(dead, exist_ok=True); open(os.path.join(dead, "x.txt"), "w").write("x")
+        mine = os.path.join(S.WORK, "keep.txt"); open(mine, "w").write("x")
+        S.clean_old_runs()
+        chk("閉じたアプリの古い作業フォルダだけを消し、自分の分は、消さない", (not os.path.exists(dead)) and os.path.exists(mine))
+
+        # 7 リセット
+        call("/api/reset?mode=qo", "POST", b""); stt = call("/api/state?mode=qo")[1]
+        chk("全部リセットで、書類が空になる", all(not s["見積"] and not s["発注"] for s in stt["slots"]) and stt["job"]["status"] == "idle")
+
+        # 8 結果の保存(デスクトップ)
+        s5, m5 = call("/api/savehtml", "POST", "<html>確認</html>".encode("utf-8"))
+        ok = s5 == 200 and os.path.exists(m5.get("path", ""))
+        chk("結果をデスクトップに保存できる", ok, m5)
+        if ok:
+            try: os.remove(m5["path"])
+            except OSError: pass
+        shutil.rmtree(S.WORK, ignore_errors=True)
+    except Exception:
+        chk("例外なく最後まで動く", False, traceback.format_exc())
+    ng = [x for x in res if not x[0]]
+    lines = [("OK " if o else "NG ") + n + ((" … " + i) if (i and not o) else "") for o, n, i in res]
+    open(outpath, "w", encoding="utf-8").write(("SMOKE OK\n" if not ng else "SMOKE NG\n") + "\n".join(lines) + "\n")
+    return 0 if not ng else 1
+
+
 def main():
     import server
     srv, port = server.start(0)
@@ -83,4 +209,6 @@ def main():
 if __name__ == "__main__":
     if len(sys.argv) >= 3 and sys.argv[1] == "--selftest":
         sys.exit(selftest(sys.argv[2]))
+    if len(sys.argv) >= 3 and sys.argv[1] == "--smoke":
+        sys.exit(smoke(sys.argv[2]))
     main()
