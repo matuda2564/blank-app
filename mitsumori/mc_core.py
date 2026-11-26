@@ -745,7 +745,10 @@ def pair_docs(quotes, orders):
                 cand.append((2.0, i, "見積番号が一致"))
             else:
                 sc = jaccard([r["model"] for r in q.rows], [r["model"] for r in o.rows])
-                cand.append((sc, i, f"型式の重なり {sc:.0%}"))
+                why = f"型式の重なり {sc:.0%}"
+                if qn and sc > 0 and qn in norm(o.text):   # 発注書のどこかに、見積番号が書いてあれば、同点のときの決め手にする(画像で読み違えて、見積番号の欄としては拾えなくても)
+                    sc += 0.5; why += "+発注書に見積番号が書いてある"
+                cand.append((sc, i, why))
         cand.sort(reverse=True)
         if cand and cand[0][0] >= 0.5 and (len(cand) == 1 or cand[0][0] - cand[1][0] >= 0.2 or cand[0][0] >= 2.0):
             used.add(cand[0][1]); pairs.append((quotes[cand[0][1]], o, cand[0][2]))
@@ -756,6 +759,126 @@ def pair_docs(quotes, orders):
         if i not in used:
             pairs.append((q, None, "対応する発注書がない"))
     return pairs
+
+
+
+def _hdr_cols(toks):
+    """見出し行のかたまりから、数量・単位・単価・金額の列の中心位置を求める。
+    『数 量』『単 価』のように1字ずつ分かれた見出しや、『|単位|単価』のように、くっついて読まれた見出しも、扱う"""
+    pieces = []   # (文字列, 中心x)
+    for t, a, b in toks:
+        nt = "".join(VARIANT.get(ch, ch) for ch in norm(t))
+        parts = [x for x in re.split(r"[|｜/／・,:：]+", nt) if x]
+        n = max(1, len(nt)); pos = 0
+        for x in parts:
+            k = nt.find(x, pos); k = pos if k < 0 else k
+            pieces.append((x, a + (b - a) * (k + len(x) / 2) / n)); pos = k + len(x)
+    cols = {}
+    for idx, (x, c) in enumerate(pieces):
+        nxt = pieces[idx + 1][0] if idx + 1 < len(pieces) else ""
+        for key, words in (("qty", ("数量",)), ("unit", ("単位",)), ("price", ("単価",)), ("amount", ("金額",))):
+            if key not in cols and any(w in x for w in words): cols[key] = c
+        if "qty" not in cols and x == "数" and nxt == "量": cols["qty"] = c
+        if "amount" not in cols and x == "金" and nxt == "額": cols["amount"] = c
+        if "price" not in cols and x == "単" and nxt == "価": cols["price"] = c
+        if "unit" not in cols and x == "単" and nxt == "位": cols["unit"] = c
+    return cols
+
+
+def item_rows(lines):
+    """明細行を作る(見積⇔発注用)。型式は『型式・品名の列(数量より左)』から、型番らしい文字列を拾い、
+    数量・単価・金額は、見出しの列の位置に合う数字を読む。型番が、数字の行の上や下の行に、書いてある書類も多いので、
+    型番は『いちばん近い数字の行』に付ける(同じ距離なら、下の行)。戻り: (行のリスト, 見出しを見つけたか)"""
+    rows, found_any = [], False
+    for pg in sorted({L.get("page", 0) for L in lines}):
+        pl = [L for L in lines if L.get("page", 0) == pg]
+        hi = None
+        for i, L in enumerate(pl):
+            t = "".join(VARIANT.get(ch, ch) for ch in norm(L["text"]))
+            if ("数量" in t or ("数" in t and "量" in t)) and _has_any(t, HDR["model"] + HDR["name"] + ("仕様", "仕樣", "摘要")):
+                hi = i; break
+        if hi is None or not pl[hi].get("toks"): continue
+        cols = _hdr_cols(pl[hi]["toks"])
+        if "qty" not in cols: continue
+        found_any = True
+        qx = min(cols.values())
+        end = len(pl)
+        for j in range(hi + 1, len(pl)):
+            tk = pl[j].get("toks") or []
+            lead = [t for t, a, b in tk if (a + b) / 2 < qx] or [t for t, _, _ in tk[:1]]
+            nt = "".join(VARIANT.get(ch, ch) for ch in norm(" ".join(lead) if tk else pl[j]["text"]))
+            if _has_any(nt, _END_WORDS) and not _has_any(nt, HDR["model"] + HDR["name"]): end = j; break
+        body = pl[hi + 1:end]
+        nums = []   # 数字の行: {line, qty, price, amount, unit}
+        for L in body:
+            vals = {}
+            for t, a, b in L.get("toks") or []:
+                c = (a + b) / 2
+                if c < qx - 5: continue
+                v, u = to_num(t)
+                if v is None and not (t in UNITS): continue
+                if v is None:
+                    if "unit" in cols and abs(cols["unit"] - c) <= 40: vals.setdefault("unit", t)
+                    continue
+                cand = [k for k in ("qty", "price", "amount") if k in cols]
+                if not cand: continue
+                key = min(cand, key=lambda k: abs(cols[k] - c))
+                if abs(cols[key] - c) > 70: continue
+                if key not in vals: vals[key] = v
+                if u and "unit" not in vals: vals["unit"] = u
+            if sum(1 for k in ("qty", "price", "amount") if k in vals) >= 2 or ("qty" in vals and "amount" in vals):
+                nums.append((L, vals))
+        if not nums: continue
+        for i, L in enumerate(body):
+            left = [(t, a, b) for t, a, b in (L.get("toks") or []) if (a + b) / 2 < qx]
+            for tok in model_tokens(" ".join(t for t, _, _ in left)):
+                yc = (L["y0"] + L["y1"]) / 2
+                best = min(nums, key=lambda nv: (abs((nv[0]["y0"] + nv[0]["y1"]) / 2 - yc), -((nv[0]["y0"]) )))
+                NL, vals = best
+                rows.append({"model_raw": tok, "model": norm(tok), "page": pg, "src": L["src"], "problems": [], "soft": [],
+                             "qty": vals.get("qty"), "price": vals.get("price"), "amount": vals.get("amount"), "unit": vals.get("unit"),
+                             "name": None, "due": None, "raw": NL["text"],
+                             "x0": min(L["x0"], NL["x0"]), "y0": min(L["y0"], NL["y0"]), "x1": max(L["x1"], NL["x1"]), "y1": max(L["y1"], NL["y1"])})
+    for r in rows:
+        if r.get("qty") and r.get("price") and r.get("amount") is not None and r["qty"] * r["price"] != r["amount"]:
+            r["problems"].append(f"数量×単価={r['qty']*r['price']:,}が金額{r['amount']:,}と合わない")
+    return rows, found_any
+
+
+def apply_item_rows(d):
+    """文字入りPDF・画像の明細を、列の位置から作り直す(表に型式の列が無く、品名の欄に型番が書いてある書類でも、型式を取れるように)。
+    画像は、型式が2種類の読み取りの両方で見つかり、数量・単価・金額も確かめられた行だけを『確実』にする。取れなかったときは、元の行を使う"""
+    if d.src == "excel" or not d.lines: return
+    r1, ok1 = item_rows(d.lines)
+    if not r1: return
+    if d.src == "ocr":
+        dt = doc_tokens(d)   # 2種類の読み取りでの、型番の一致(くっつき違いの整理つき)
+        def _glued(longk, shortk):
+            return len(shortk) >= 5 and longk.startswith(shortk) and 1 <= len(longk) - len(shortk) <= 2 and longk[len(shortk):].isdigit()
+        r2, _ = item_rows(d.lines2)
+        m2 = {tkey(r["model_raw"]): r for r in r2}
+        keep = []
+        for r in r1:
+            k = tkey(r["model_raw"])
+            if k not in dt:
+                kk = next((x for x in dt if _glued(k, x)), None)
+                if kk: r["model_raw"] = dt[kk]["raw"]; r["model"] = norm(dt[kk]["raw"]); k = kk
+            v = dt.get(k)
+            if not v or v.get("noise"): continue
+            o = m2.get(k)
+            if not v["sure"]: r["problems"].append("型式が、2種類の読み取りの片方でしか、見つからない")
+            if o:
+                if any(o.get(x) != r.get(x) for x in ("qty", "price", "amount")): r["problems"].append("画像の2種類の読み取りで、数量・単価・金額が食い違う")
+            elif not (r.get("qty") and r.get("price") and r.get("amount") is not None):
+                r["problems"].append("数量・単価・金額を、2種類の読み取りで確かめられない(見出しの列を読めなかった)")
+            r["exact"] = not r["problems"]
+            keep.append(r)
+        r1 = keep
+        if not r1: return
+    else:
+        for r in r1: r["exact"] = not r["problems"]
+    d.rows = r1
+    d.notes = [n for n in d.notes if "見出し" not in n]
 
 
 # ------------------------------------------------------------------ 照合
@@ -1100,6 +1223,9 @@ def run_vendor(vdir, workers=4, progress=None, name=None, mode="qo", with_qty=Fa
                 out["warnings"].append(f"{d.role}フォルダの「{d.name}」は、中身が「{k}」と読める。入れる場所を間違えていないか確認してください" + ("(見積同士を比べるときは、上の「見積 ⇔ 見積」のタブを使います)" if k == "見積" and d.role == "発注" else ""))
         elif k == "発注":
             out["warnings"].append(f"{d.role}フォルダの「{d.name}」は、中身が「発注書」と読める。見積書を入れる場所です。間違えていないか確認してください")
+        if mode == "qo":
+            try: apply_item_rows(d)
+            except Exception as e: log(f"apply_item_rows失敗 {d.name}: {e!r}")
         docs[d.role].append(d)
     out["seconds"] = sum(d.seconds for r in docs.values() for d in r)
     A, B = docs[roles[0]], docs[roles[1]]
