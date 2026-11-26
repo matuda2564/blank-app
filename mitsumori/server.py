@@ -13,7 +13,9 @@ import mc_core as C
 VERSION = "v1"
 TOKEN = secrets.token_urlsafe(18)   # 起動ごとに変わる合言葉。これを持たない要求は断る(他のサイトからの勝手な操作を防ぐ)
 PORT = {"n": 0}
-WORK = os.environ.get("MC_WORK") or os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "見積照合_作業フォルダ")
+WORK_BASE = os.environ.get("MC_WORK") or os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "見積照合_作業フォルダ")
+WORK = WORK_BASE   # start() で、このアプリ専用の場所(run_<番号>)に切り替わる
+MAX_UPLOAD = 300 * 1024 * 1024   # 1ファイルの上限(300MB)
 NSLOT = 4
 ROLES = ("見積", "発注")
 MODES = C.ROLES_BY_MODE   # qo=見積⇔発注 / qq=見積⇔見積(客先と仕入先)
@@ -24,7 +26,8 @@ def _mode(q):
     if m not in MODES: raise ValueError("使い方の指定が違います")
     return m
 LOCK = threading.Lock()
-JOB = {"status": "idle", "done": 0, "total": 0, "msg": "", "result": None, "t0": 0, "sec": 0}
+JOB = {"status": "idle", "done": 0, "total": 0, "msg": "", "result": None, "t0": 0, "sec": 0, "gen": 0, "ev": None}
+HEALTH = {"state": "checking"}
 NAMES = {m: {i: f"{'ABCD'[i-1]}社" for i in range(1, NSLOT + 1)} for m in MODES}
 
 
@@ -50,6 +53,54 @@ def state(mode="qo"):
     j = {k: JOB[k] for k in ("status", "done", "total", "msg", "sec")}; j["mode"] = JOB.get("mode")
     if JOB["status"] == "running": j["sec"] = round(time.time() - JOB["t0"])
     return {"version": VERSION, "slots": slots, "job": j}
+
+
+def unsupported_msg(ext):
+    hint = {".xls": "古い形式のExcelです。Excelで開いて、「名前を付けて保存」から「.xlsx」で保存し直してください",
+            ".doc": "Wordの書類は、読めません。PDFにして、入れてください", ".docx": "Wordの書類は、読めません。PDFにして、入れてください",
+            ".heic": "iPhoneのHEIC画像は、読めません。JPEGで保存し直してください", ".csv": "CSVは、読めません。Excel(.xlsx)で保存し直してください",
+            ".zip": "zipは、解凍してから、中のファイルを入れてください"}.get(ext)
+    return f"この形式は、読めません({ext or '拡張子なし'})。" + (hint + "。" if hint else "") + "対応: PDF・Excel(.xlsx)・画像(png / jpg / tif / bmp / webp)"
+
+
+def desktop_dir():
+    for c in (os.path.join(os.environ.get("OneDrive") or "", "Desktop"), os.path.join(os.path.expanduser("~"), "Desktop"), os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop")):
+        if c and os.path.isdir(c): return c
+    return os.path.expanduser("~")
+
+
+def save_html_to_desktop(body):
+    d = desktop_dir()
+    p = os.path.join(d, "照合結果_" + time.strftime("%Y%m%d_%H%M%S") + ".html")
+    with open(p, "wb") as f: f.write(body)
+    return p
+
+
+def _pid_alive(pid):
+    try:
+        if os.name == "nt":
+            import ctypes
+            h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h: return False
+            ctypes.windll.kernel32.CloseHandle(h); return True
+        os.kill(pid, 0); return True
+    except PermissionError:
+        return True
+    except Exception:
+        return False
+
+
+def clean_old_runs():
+    """前に動いていた(もう閉じた)アプリの作業フォルダを消す。動いている別のアプリの分は、消さない"""
+    try:
+        for n in os.listdir(WORK_BASE):
+            if n.startswith("run_"):
+                try: pid = int(n[4:])
+                except ValueError: continue
+                if pid != os.getpid() and not _pid_alive(pid):
+                    shutil.rmtree(os.path.join(WORK_BASE, n), ignore_errors=True)
+    except Exception:
+        pass
 
 
 def serialize(vendors):
@@ -95,26 +146,31 @@ def serialize(vendors):
     return {"vendors": out, "pages": pages}
 
 
-def run_job(mode="qo", with_qty=False):
+def run_job(mode="qo", with_qty=False, gen=0, ev=None):
+    cancel = ev.is_set if ev else None
+    cur = lambda: JOB["gen"] == gen    # 中止されたあと、古い仕事が、画面の状態を上書きしない
     try:
         vendors = []
         RL = MODES[mode]
         slots = [i for i in range(1, NSLOT + 1) if any(os.path.isdir(slot_dir(i, r)) and os.listdir(slot_dir(i, r)) for r in RL)]
         total = sum(len(os.listdir(slot_dir(i, r))) for i in slots for r in RL if os.path.isdir(slot_dir(i, r)))
-        JOB.update(total=total, done=0)
+        if cur(): JOB.update(total=total, done=0)
         base = {"n": 0}
         for i in slots:
             def prog(done, tot, base=base):
-                JOB["done"] = base["n"] + done
+                if cur(): JOB["done"] = base["n"] + done
             n_in = sum(len(os.listdir(slot_dir(i, r))) for r in RL if os.path.isdir(slot_dir(i, r)))
-            vendors.append(C.run_vendor(slot_dir(i), workers=C.auto_workers(), progress=prog, name=NAMES[mode][i], mode=mode, with_qty=with_qty))
-            base["n"] += n_in; JOB["done"] = base["n"]
-        JOB["result"] = serialize(vendors)
-        JOB["status"] = "done"
+            vendors.append(C.run_vendor(slot_dir(i), workers=C.auto_workers(), progress=prog, name=NAMES[mode][i], mode=mode, with_qty=with_qty, cancel=cancel))
+            base["n"] += n_in
+            if cur(): JOB["done"] = base["n"]
+        res = serialize(vendors)
+        if cur(): JOB["result"] = res; JOB["status"] = "done"
+    except C.Cancelled:
+        C.log("照合を中止した")
     except BaseException as e:  # 失敗は隠さず画面に出す(ログにも残す)
         C.log("照合が失敗: " + traceback.format_exc())
-        JOB["status"] = "error"; JOB["msg"] = f"{type(e).__name__}: {e}"
-    JOB["sec"] = round(time.time() - JOB["t0"])
+        if cur(): JOB["status"] = "error"; JOB["msg"] = f"{type(e).__name__}: {e}"
+    if cur(): JOB["sec"] = round(time.time() - JOB["t0"])
 
 
 class H(BaseHTTPRequestHandler):
@@ -150,6 +206,7 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/api/state":
             try: return self._send(200, state(_mode(dict(urllib.parse.parse_qsl(u.query)))))
             except ValueError as e: return self._send(400, {"error": str(e)})
+        if u.path == "/api/health": return self._send(200, HEALTH)
         if u.path == "/api/result": return self._send(200, {"status": JOB["status"], "result": JOB["result"], "msg": JOB["msg"], "sec": JOB["sec"], "mode": JOB.get("mode")})
         self._send(404, {"error": "not found"})
 
@@ -157,20 +214,31 @@ class H(BaseHTTPRequestHandler):
         if not self._guard(False): return
         u = urllib.parse.urlparse(self.path); q = dict(urllib.parse.parse_qsl(u.query))
         n = int(self.headers.get("Content-Length") or 0)
+        if n > MAX_UPLOAD:
+            return self._send(413, {"error": f"ファイルが大きすぎます({n // 2**20}MB)。{MAX_UPLOAD // 2**20}MBまでです"})
         body = self.rfile.read(n) if n else b""
         try:
             if u.path == "/api/upload":
                 mode = _mode(q); i, role = int(q["slot"]), q["role"]
                 assert 1 <= i <= NSLOT and role in MODES[mode]
-                if JOB["status"] == "running": return self._send(409, {"error": "照合中です。終わってからにしてください"})
+                if JOB["status"] == "running": return self._send(409, {"error": "照合中です。終わってからにしてください(止まっているときは「中止」を押してください)"})
+                name = safe_name(q.get("name", "file")); ext = os.path.splitext(name)[1].lower()
+                if ext not in C.EXTS: return self._send(400, {"error": unsupported_msg(ext)})
+                if not body: return self._send(400, {"error": "中身が空のファイルです(フォルダを入れていませんか。ファイルを入れてください)"})
                 d = slot_dir(i, role); os.makedirs(d, exist_ok=True)
-                name = safe_name(q.get("name", "file")); p = os.path.join(d, name); k = 1
+                p = os.path.join(d, name); k = 1
                 while os.path.exists(p):
                     b, e = os.path.splitext(name); p = os.path.join(d, f"{b}({k}){e}"); k += 1
-                open(p, "wb").write(body)
+                try:
+                    open(p, "wb").write(body)
+                except OSError as e:
+                    try: os.remove(p)
+                    except OSError: pass
+                    return self._send(507, {"error": f"保存できませんでした(パソコンの空き容量が、足りないかもしれません): {e.strerror or e}"})
                 if JOB["status"] in ("done", "error"): JOB.update(status="idle", result=None)   # 書類が変わったら、前の結果は消す
                 return self._send(200, {"ok": True})
             if u.path == "/api/remove":
+                if JOB["status"] == "running": return self._send(409, {"error": "照合中です。終わってからにしてください"})
                 mode = _mode(q); i, role = int(q["slot"]), q["role"]
                 assert 1 <= i <= NSLOT and role in MODES[mode]
                 p = os.path.join(slot_dir(i, role), safe_name(q["name"]))
@@ -183,9 +251,19 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/run":
                 if JOB["status"] == "running": return self._send(409, {"error": "照合中です"})
                 mode = _mode(q); wq = q.get("qty") == "1"
-                JOB.update(status="running", done=0, total=0, msg="", result=None, t0=time.time(), sec=0, mode=mode)
-                threading.Thread(target=run_job, args=(mode, wq), daemon=True).start()
+                JOB["gen"] += 1; ev = threading.Event()
+                JOB.update(status="running", done=0, total=0, msg="", result=None, t0=time.time(), sec=0, mode=mode, ev=ev)
+                threading.Thread(target=run_job, args=(mode, wq, JOB["gen"], ev), daemon=True).start()
                 return self._send(200, {"ok": True})
+            if u.path == "/api/cancel":   # 中止: 読み取りが止まったときも、これで、元に戻れる
+                if JOB["status"] == "running":
+                    JOB["gen"] += 1
+                    if JOB.get("ev"): JOB["ev"].set()
+                    JOB.update(status="idle", done=0, total=0, msg="", result=None, sec=0)
+                    C.log("利用者が中止を押した")
+                return self._send(200, {"ok": True})
+            if u.path == "/api/savehtml":   # 結果をデスクトップに保存する(専用の窓では、ダウンロードが動かないことがあるため)
+                return self._send(200, {"ok": True, "path": save_html_to_desktop(body)})
             if u.path == "/api/reset":   # リセット: その使い方の、書類も結果も、消す(もう一方の使い方の書類は、消さない)
                 if JOB["status"] == "running": return self._send(409, {"error": "照合中です"})
                 mode = _mode(q)
@@ -205,7 +283,7 @@ class H(BaseHTTPRequestHandler):
 def setup_log():
     """落ちたとき、原因を調べられるように、ログを残す。書類の中身は、書かない。場所: 作業フォルダの1つ上の mitsumori_check_log.txt"""
     try:
-        C.LOGFILE = os.path.join(os.path.dirname(WORK), "mitsumori_check_log.txt")
+        C.LOGFILE = os.path.join(os.path.dirname(WORK_BASE), "mitsumori_check_log.txt")
         if os.path.exists(C.LOGFILE) and os.path.getsize(C.LOGFILE) > 2_000_000:
             os.replace(C.LOGFILE, C.LOGFILE + ".old")
         C.log(f"=== 起動 {VERSION} / 空きメモリ {C.avail_mb()}MB / コア {os.cpu_count()} / 同時に読む数 {C.auto_workers()} ===")
@@ -218,12 +296,22 @@ def setup_log():
 
 
 def start(port=0):
-    os.makedirs(WORK, exist_ok=True)
+    global WORK
+    os.makedirs(WORK_BASE, exist_ok=True)
+    WORK = os.path.join(WORK_BASE, f"run_{os.getpid()}")   # このアプリ専用。2つ開いても、互いの書類を消さない
     setup_log()
-    shutil.rmtree(WORK, ignore_errors=True); os.makedirs(WORK, exist_ok=True)   # 起動時にも前回の書類は消す(覚えない)
+    clean_old_runs()
+    shutil.rmtree(WORK, ignore_errors=True); os.makedirs(WORK, exist_ok=True)   # 起動時にも、前回の書類は消す(覚えない)
     srv = ThreadingHTTPServer(("127.0.0.1", port), H)
     PORT["n"] = srv.server_address[1]
     threading.Thread(target=srv.serve_forever, daemon=True).start()
+    def _health():
+        try:
+            HEALTH.clear(); HEALTH.update(state="checking"); r = C.health(); HEALTH.clear(); HEALTH.update(state="done", **r)
+            C.log(f"自己診断: {HEALTH}")
+        except Exception as e:
+            HEALTH.clear(); HEALTH.update(state="done", ok=False, rapid=False, tess=False, msg=f"{type(e).__name__}: {e}")
+    threading.Thread(target=_health, daemon=True).start()
     return srv, srv.server_address[1]
 
 

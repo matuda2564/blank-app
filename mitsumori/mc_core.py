@@ -62,6 +62,26 @@ def auto_workers(max_w=4):
     return w
 
 
+class Cancelled(Exception):
+    """利用者が「中止」を押した"""
+
+
+def safe_tmp_dir():
+    """一時ファイルを置く場所。ユーザー名が日本語だと、Tesseractが、画像を開けないことがあるので、英数字だけの場所を選ぶ"""
+    t = tempfile.gettempdir()
+    try:
+        t.encode("ascii"); return t
+    except UnicodeEncodeError:
+        pass
+    for c in (os.environ.get("PUBLIC"), os.environ.get("ProgramData"), "C:\\Users\\Public", "C:\\ProgramData", "/tmp"):
+        try:
+            if c and c.encode("ascii") and os.path.isdir(c):
+                d = os.path.join(c, "mitsumori_check_tmp"); os.makedirs(d, exist_ok=True); return d
+        except Exception:
+            continue
+    return t
+
+
 _LAST_IMG = {}
 
 
@@ -383,14 +403,16 @@ def otsu_bw(img):
 def ocr_tess(img):
     from PIL import ImageFilter
     big = otsu_bw(img.convert("L").filter(ImageFilter.MedianFilter(3)))
-    with tempfile.TemporaryDirectory() as d:
+    with tempfile.TemporaryDirectory(dir=safe_tmp_dir()) as d:
         p = os.path.join(d, "a.png"); big.save(p)
         env = dict(os.environ, OMP_THREAD_LIMIT="1")
         try:
             kw = {"creationflags": 0x08000000} if os.name == "nt" else {}   # Windows: 黒い窓を出さない
             out = subprocess.run([TESS_EXE, p, "stdout", "-l", "jpn+eng", "--psm", "6", "tsv"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=25, **kw).stdout
         except subprocess.TimeoutExpired:
-            return []   # 時間切れ → 読み取りなし(=要確認になる。黙って通さない)
+            log("Tesseractが時間切れ"); return []   # 時間切れ → 読み取りなし(=要確認になる。黙って通さない)
+        except Exception as e:
+            log(f"Tesseractが動かない: {type(e).__name__}: {e}"); return []
     rows = {}
     for ln in out.splitlines()[1:]:
         f = ln.split("\t")
@@ -470,9 +492,10 @@ def merge_readers(readers):
     return out
 
 
-def read_doc(path, role):
+def read_doc(path, role, cancel=None):
     t0 = time.time()
     d = Doc(path, role)
+    cancel = cancel or (lambda: False)
     ext = os.path.splitext(path)[1].lower()
     # メモリが足りないときは、少し待つ。それでも足りなければ、落ちずに「読めなかった」と出す
     for _ in range(30):
@@ -491,6 +514,7 @@ def read_doc(path, role):
             pdf = fitz.open(path)
             npages = len(pdf)
             for pno, page in enumerate(pdf):
+                if cancel(): raise Cancelled()
                 if pno >= MAX_PAGES:
                     d.notes.append(f"ページが多いので、先頭{MAX_PAGES}ページだけ読みました(残り{npages - MAX_PAGES}ページは読んでいません。目視で確認してください)")
                     break
@@ -525,7 +549,7 @@ def read_doc(path, role):
                     d.notes.append(f"{pno+1}ページ: 読み込みに失敗: {type(e).__name__}: {e}")
                     log(f"ページ失敗: {d.name} p{pno+1} {type(e).__name__}: {e}")
                 if pno % 5 == 4: gc.collect()
-        elif ext in (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"):
+        elif ext in IMG_EXTS:
             from PIL import ImageOps
             im = Image.open(path)
             try: im = ImageOps.exif_transpose(im)   # スマホ写真の向きを直す
@@ -539,6 +563,8 @@ def read_doc(path, role):
             d.pages = [(PageImg(im), 1.0)]
         else:
             d.notes.append("対応していない形式")
+    except Cancelled:
+        raise
     except Exception as e:
         d.notes.append(f"読み込みに失敗: {e}")
         log(f"読み込み失敗: {d.name} {type(e).__name__}: {e}")
@@ -551,6 +577,8 @@ def read_doc(path, role):
 def scan_ocr(d, im, pno, extra):
     sa, sb = ocr_rapid(im), ocr_tess(im)
     la, lb = group_lines(sa), group_lines(sb)
+    if sa and not sb:
+        d.notes.append(f"{pno+1}ページ: 2つ目の読み取り(Tesseract)が動かなかった。確実とは言えないので、全部、人が確認してください")
     d.text += " ".join(l["text"] for l in la) + "\n"
     ra, ta, ea = parse_rows(la); rb, tb, eb = parse_rows(lb)
     if ea:   # 基準の読み取りが見出しを読めないときだけ、書類全体の注意にする(2つ目だけ読めない場合は、行の一致で扱う)
@@ -574,7 +602,11 @@ def read_excel(d):
     d.kind = "Excel"; d.src = "excel"
     wb = openpyxl.load_workbook(d.path, data_only=True)
     ws = wb.active
-    grid = [[("" if c is None else str(c)) for c in row] for row in ws.iter_rows(values_only=True)]
+    grid = []
+    for k, row in enumerate(ws.iter_rows(values_only=True)):
+        if k >= 5000:
+            d.notes.append("行が多すぎるので、先頭5,000行だけ読みました(残りは読んでいません。目視で確認してください)"); break
+        grid.append([("" if c is None else str(c)) for c in row])
     d.text = "\n".join(" ".join(r) for r in grid)
     hi = None
     for i, r in enumerate(grid):
@@ -840,28 +872,36 @@ def page_jpeg_b64(doc, pno, maxw=1000):
 
 
 # ------------------------------------------------------------------ 1社ぶん・全社ぶん
-EXTS = (".pdf", ".xlsx", ".xlsm", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp")
+IMG_EXTS = (".png", ".jpg", ".jpeg", ".jfif", ".webp", ".tif", ".tiff", ".bmp")
+EXTS = (".pdf", ".xlsx", ".xlsm") + IMG_EXTS
 
 
-def _read_job(args):
-    return read_doc(*args)
+def _read_job(args, cancel=None):
+    return read_doc(args[0], args[1], cancel)
 
 
-def read_many(jobs, workers=4, progress=None):
+def read_many(jobs, workers=4, progress=None, cancel=None):
     """書類を並列に読む(画像のOCRが遅いので)。progress(done, total) があれば進み具合を知らせる"""
     out = [None] * len(jobs)
     if workers <= 1 or len(jobs) <= 1:
         for i, j in enumerate(jobs):
-            out[i] = _read_job(j)
+            if cancel and cancel(): raise Cancelled()
+            out[i] = _read_job(j, cancel)
             if progress: progress(i + 1, len(jobs))
         return out
     import concurrent.futures as cf
     done = 0
-    with cf.ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = {ex.submit(_read_job, j): i for i, j in enumerate(jobs)}
+    ex = cf.ThreadPoolExecutor(max_workers=workers)
+    try:
+        futs = {ex.submit(_read_job, j, cancel): i for i, j in enumerate(jobs)}
         for f in cf.as_completed(futs):
+            if cancel and cancel(): raise Cancelled()
             out[futs[f]] = f.result(); done += 1
             if progress: progress(done, len(jobs))
+    except BaseException:
+        ex.shutdown(wait=False, cancel_futures=True)   # 中止・失敗のとき、まだ始めていない書類は、読まない
+        raise
+    ex.shutdown(wait=True)
     return out
 
 
@@ -869,7 +909,7 @@ ROLES_BY_MODE = {"qo": ("見積", "発注"), "qq": ("客先見積", "仕入先�
 SKIPNOTE_QQ = "単価・金額・合計・納期・単位(違って当たり前なので、比べません)"
 
 
-def run_vendor(vdir, workers=4, progress=None, name=None, mode="qo", with_qty=False):
+def run_vendor(vdir, workers=4, progress=None, name=None, mode="qo", with_qty=False, cancel=None):
     roles = ROLES_BY_MODE[mode]
     out = {"vendor": name or os.path.basename(vdir), "pairs": [], "warnings": []}
     jobs = []
@@ -880,7 +920,7 @@ def run_vendor(vdir, workers=4, progress=None, name=None, mode="qo", with_qty=Fa
             if fn.lower().endswith(EXTS):
                 jobs.append((os.path.join(rd, fn), role))
     docs = {roles[0]: [], roles[1]: []}
-    for d in read_many(jobs, workers, progress):
+    for d in read_many(jobs, workers, progress, cancel):
         k = kind_of(d.text)
         if mode == "qo":
             if k and k != d.role:
@@ -907,3 +947,20 @@ def run_vendor(vdir, workers=4, progress=None, name=None, mode="qo", with_qty=Fa
 def run_all(root, workers=4):
     vendors = [os.path.join(root, d) for d in sorted(os.listdir(root)) if os.path.isdir(os.path.join(root, d))]
     return [run_vendor(v, workers) for v in vendors]
+
+
+def health():
+    """読み取りの部品が、このパソコンで、動くか(起動時に1回。画面に、動かないものを、出す)"""
+    out = {"rapid": False, "tess": False, "msg": ""}
+    try:
+        from PIL import ImageDraw
+        im = Image.new("RGB", (700, 160), "white"); dr = ImageDraw.Draw(im)
+        for k in range(3): dr.text((20, 20 + 40 * k), "AW20-02BE-D  10  3,400  34,000", fill="black")
+        try: out["rapid"] = len(ocr_rapid(im)) >= 1
+        except Exception as e: out["msg"] += f"RapidOCR: {type(e).__name__}: {e}  "
+        try: out["tess"] = len(ocr_tess(im)) >= 1
+        except Exception as e: out["msg"] += f"Tesseract: {type(e).__name__}: {e}  "
+    except Exception as e:
+        out["msg"] += f"自己診断の失敗: {type(e).__name__}: {e}"
+    out["ok"] = out["rapid"] and out["tess"]
+    return out

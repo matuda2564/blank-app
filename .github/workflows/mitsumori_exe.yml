@@ -31,6 +31,14 @@ jobs:
           python mitsumori/launcher.py --selftest selftest_src.txt
           Get-Content selftest_src.txt
           if (-not (Select-String -Path selftest_src.txt -Pattern "SELFTEST OK" -Quiet)) { exit 1 }
+      - name: 日本語の名前の場所で、サーバーごと通しで試す(ソース)
+        shell: pwsh
+        run: |
+          $t = "C:\テスト用\一時"; New-Item -ItemType Directory -Force -Path $t | Out-Null
+          $env:TEMP = $t; $env:TMP = $t; $env:MC_WORK = "C:\テスト用\作業フォルダ"
+          python mitsumori/launcher.py --smoke smoke_src.txt
+          Get-Content smoke_src.txt
+          if (-not (Select-String -Path smoke_src.txt -Pattern "SMOKE OK" -Quiet)) { exit 1 }
       - name: exe を作る
         shell: pwsh
         run: |
@@ -42,6 +50,16 @@ jobs:
           $p = Start-Process -FilePath "dist\MitsumoriCheck\MitsumoriCheck.exe" -ArgumentList "--selftest","$PWD\selftest_exe.txt" -PassThru -Wait
           Get-Content selftest_exe.txt
           if (-not (Select-String -Path selftest_exe.txt -Pattern "SELFTEST OK" -Quiet)) { exit 1 }
+      - name: 日本語の名前の場所で、作った exe を、通しで試す
+        shell: pwsh
+        run: |
+          $t = "C:\テスト用\一時"; New-Item -ItemType Directory -Force -Path $t | Out-Null
+          $env:TEMP = $t; $env:TMP = $t; $env:MC_WORK = "C:\テスト用\作業フォルダ"
+          $d = "C:\テスト用\見積照合 フォルダ"; New-Item -ItemType Directory -Force -Path $d | Out-Null
+          Copy-Item -Recurse -Force "dist\MitsumoriCheck\*" $d
+          $p = Start-Process -FilePath "$d\MitsumoriCheck.exe" -ArgumentList "--smoke","$PWD\smoke_exe.txt" -PassThru -Wait
+          Get-Content smoke_exe.txt
+          if (-not (Select-String -Path smoke_exe.txt -Pattern "SMOKE OK" -Quiet)) { exit 1 }
       - name: 配る形にまとめる
         shell: pwsh
         run: |

@@ -50,10 +50,13 @@ button.sm.pri{background:var(--pri);color:#fff}
 .tabs{display:flex;gap:6px;padding:10px 20px 0;flex-wrap:wrap}
 .tabs button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px 8px 0 0;padding:9px 16px;font:inherit;font-size:14px;cursor:pointer}
 .tabs button.on{background:var(--pri);color:#fff;border-color:var(--pri);font-weight:700}
+.bn{margin:8px 20px 0;padding:10px 14px;border-radius:8px;font-size:14px;line-height:1.6}.bn.ng{background:var(--ngbg);color:#7a1f1f;border:1px solid var(--ng)}.bn.rv{background:var(--rvbg);color:#5c4300;border:1px solid var(--rv)}
 .opt{margin:8px 0;font-size:14px}.opt small{color:var(--sub)}
 @media print{header,.slots,.bar,.note,.tabs,.opt{display:none}}
 </style></head><body>
 <header><h1 id="ttl">見積・発注 照合</h1><small id="ver"></small><small>書類はこのパソコンの中だけで処理します(外には送りません)</small></header>
+<div class="bn ng" id="conn" hidden></div>
+<div class="bn rv" id="hl" hidden></div>
 <nav class="tabs"><button id="tab-qo" class="on">見積 ⇔ 発注</button><button id="tab-qq">見積 ⇔ 見積(客先に出した見積 と 仕入先の見積)</button></nav>
 <main>
 <div class="note" id="note-qq" hidden>
@@ -68,6 +71,7 @@ button.sm.pri{background:var(--pri);color:#fff}
 <div class="bar">
 <button class="big go" id="go">照合する</button>
 <button class="big rst" id="reset">全部リセット</button>
+<button class="big rst" id="cancel" hidden>中止</button>
 <div class="prog"><div class="t"><i id="pb"></i></div><div id="pt" style="font-size:13px;color:var(--sub)"></div></div>
 <button class="big sv" id="save" style="display:none">結果をHTMLで保存</button>
 </div>
@@ -87,8 +91,8 @@ let ST=null, timer=null, PAGES={}, ITEMS=[], CUR=-1;
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const TK=new URLSearchParams(location.search).get('t')||'';
 async function api(path,opt){opt=Object.assign({},opt);opt.headers=Object.assign({'X-MC-Token':TK},opt.headers||{});const r=await fetch(path,opt);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j}
-let SEQ=0;
-async function refresh(){const my=++SEQ;let st;try{st=await api('/api/state?mode='+MODE)}catch(e){return}if(my<SEQ)return;ST=st;render()}   // 遅れて届いた古い返事は、捨てる
+let SEQ=0, FAILS=0;
+async function refresh(){const my=++SEQ;let st;try{st=await api('/api/state?mode='+MODE);FAILS=0;$('conn').hidden=true}catch(e){if(++FAILS>=3){$('conn').hidden=false;$('conn').textContent='⚠ このアプリとの接続が切れました。アプリが終了したか、止まっています。アプリを閉じて、もう一度、開いてください(入れた書類は、入れ直しになります)。'}return}if(my<SEQ)return;ST=st;render()}   // 遅れて届いた古い返事は、捨てる
 function render(){
  $('ver').textContent=ST.version;
  const j=ST.job,running=j.status==='running';
@@ -103,15 +107,15 @@ function render(){
  }
  $('slots').innerHTML=h;
  document.querySelectorAll('.dz').forEach(z=>{
-  z.onclick=()=>{if(ST.job.status==='running')return;const i=document.createElement('input');i.type='file';i.multiple=true;i.style.display='none';i.accept='.pdf,.xlsx,.xlsm,.png,.jpg,.jpeg,.tif,.tiff,.bmp';document.body.appendChild(i);i.onchange=()=>{up(z.dataset.slot,z.dataset.role,[...i.files]).then(()=>i.remove())};i.click()};
+  z.onclick=()=>{if(ST.job.status==='running')return;const i=document.createElement('input');i.type='file';i.multiple=true;i.style.display='none';i.accept='.pdf,.xlsx,.xlsm,.png,.jpg,.jpeg,.jfif,.webp,.tif,.tiff,.bmp';document.body.appendChild(i);i.onchange=()=>{up(z.dataset.slot,z.dataset.role,[...i.files]).then(()=>i.remove())};i.click()};
   z.ondragover=e=>{e.preventDefault();z.classList.add('over')};z.ondragleave=()=>z.classList.remove('over');
   z.ondrop=e=>{e.preventDefault();z.classList.remove('over');if(ST.job.status!=='running')up(z.dataset.slot,z.dataset.role,e.dataTransfer.files)};
  });
  const has=ST.slots.some(s=>s[ROLES[0]].length&&s[ROLES[1]].length);
- $('go').disabled=running||!has; $('reset').disabled=running;
+ $('go').disabled=running||!has; $('reset').disabled=running; $('cancel').hidden=!running;
  const pct=j.total?Math.round(100*j.done/j.total):0;
  $('pb').style.width=(running?pct:(j.status==='done'?100:0))+'%';
- $('pt').textContent=running?`読み取り中… ${j.done}/${j.total}枚 (${j.sec}秒)`:(j.status==='done'?`完了(${j.sec}秒)`:(j.status==='error'?'失敗':''));
+ $('pt').textContent=running?`読み取り中… ${j.done}/${j.total}枚 (${j.sec}秒)${j.sec>=180?' 時間がかかっています。止まっているようなら「中止」を押せます':''}`:(j.status==='done'?`完了(${j.sec}秒)`:(j.status==='error'?'失敗':''));
 }
 async function up(slot,role,files){
  for(const f of files){
@@ -123,6 +127,7 @@ async function rm(slot,role,name){await api(`/api/remove?mode=${MODE}&slot=${slo
 async function resetSlot(slot){const n=(ST.slots.find(x=>x.id===slot)||{}).name||'この社';if(!confirm(n+'の書類と結果を消します。よろしいですか?'))return;try{await api(`/api/reset?mode=${MODE}&slot=${slot}`,{method:'POST'})}catch(e){alert(e.message)}$('out').innerHTML='';$('save').style.display='none';refresh()}
 async function rename(slot,name){await api(`/api/name?mode=${MODE}&slot=${slot}&name=${encodeURIComponent(name)}`,{method:'POST'})}
 $('go').onclick=async()=>{try{await api(`/api/run?mode=${MODE}&qty=${$('qty').checked?1:0}`,{method:'POST'});$('out').innerHTML='';$('save').style.display='none';poll()}catch(e){alert(e.message)}};
+$('cancel').onclick=async()=>{if(!confirm('読み取りを中止します。よろしいですか?(読み取りの結果は消えます。書類は、そのまま残ります)'))return;try{await api('/api/cancel',{method:'POST'})}catch(e){alert(e.message)}$('out').innerHTML='';$('save').style.display='none';refresh()};
 $('reset').onclick=async()=>{if(!confirm('書類も結果も、全部消します。よろしいですか?'))return;await api(`/api/reset?mode=${MODE}`,{method:'POST'});$('out').innerHTML='';$('save').style.display='none';refresh()};
 let POLLING=false;
 async function poll(){if(POLLING)return;POLLING=true;try{for(;;){await refresh();if(ST.job.status!=='running')break;await new Promise(r=>setTimeout(r,800))}}finally{POLLING=false}await showResult()}
@@ -187,7 +192,8 @@ $('vok').onclick=()=>{setDone(CUR,true);const j=nextUndone(CUR);if(j<0){alert('�
 document.addEventListener('keydown',e=>{if($('vw').hidden)return;if(e.key==='ArrowRight')showV(CUR+1);else if(e.key==='ArrowLeft')showV(CUR-1);else if(e.key==='Enter'){e.preventDefault();$('vok').click()}else if(e.key==='Escape')$('vx').click()});
 function todo(){const n=ITEMS.filter(x=>!x.done).length,e=$('todo');if(!e)return;
  e.innerHTML=ITEMS.length?`確認が必要な行: ${ITEMS.length}行のうち、未確認 ${n}行 <button class="sm pri" onclick="const j=nextUndone(-1);if(j>=0)openV(j)" ${n?'':'disabled'}>確認を始める(書類全体に赤枠・順番に)</button>`:'確認が必要な行はありません'}
-$('save').onclick=()=>{const css=document.querySelector('style').textContent;const html=`<!doctype html><meta charset="utf-8"><title>照合結果</title><style>${css}</style><body><main>${$('out').innerHTML}</main>`;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([html],{type:'text/html'}));a.download='照合結果_'+new Date().toISOString().slice(0,16).replace(/[:T]/g,'')+'.html';a.click()};
+$('save').onclick=async()=>{const css=document.querySelector('style').textContent;const html=`<!doctype html><meta charset="utf-8"><title>照合結果</title><style>${css}</style><body><main>${$('out').innerHTML}</main>`;try{const r=await api('/api/savehtml',{method:'POST',body:new Blob([html],{type:'text/html'})});alert('デスクトップに保存しました:\n'+r.path)}catch(e){alert('保存できませんでした: '+e.message)}};
+async function health(n){try{const h=await api('/api/health');if(h.state==='checking'&&n<20){setTimeout(()=>health(n+1),1500);return}if(h.state==='done'&&!h.ok){const bad=[!h.rapid?'RapidOCR':'',!h.tess?'Tesseract':''].filter(x=>x).join('・');$('hl').hidden=false;$('hl').textContent='⚠ 画像(スキャン)を読み取る部品が、このパソコンで動いていません('+bad+')。文字入りのPDFとExcelは使えますが、画像・スキャンの書類は、全部「要確認」になります。'+(h.msg?' 詳細: '+h.msg:'')}}catch(e){}}
 function setMode(m){
  MODE=m;ROLES=MODES[m].roles;
  $('tab-qo').classList.toggle('on',m==='qo');$('tab-qq').classList.toggle('on',m==='qq');
@@ -197,5 +203,5 @@ function setMode(m){
  refresh().then(()=>{if(!ST)return;if(ST.job.status==='running')poll();else if(ST.job.status==='done'&&ST.job.mode===MODE)showResult()});
 }
 $('tab-qo').onclick=()=>setMode('qo');$('tab-qq').onclick=()=>setMode('qq');
-setMode(location.hash==='#qq'?'qq':'qo');
+setMode(location.hash==='#qq'?'qq':'qo');health(0);
 </script></body></html>
