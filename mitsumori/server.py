@@ -11,6 +11,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mc_core as C
 
 VERSION = "v1"
+try:   # ビルド番号(どの版を使っているか、画面で分かるように)
+    with open(os.path.join(HERE, "BUILD.txt"), encoding="utf-8") as _f: VERSION = "build " + _f.read().strip()
+except Exception:
+    pass
 TOKEN = secrets.token_urlsafe(18)   # 起動ごとに変わる合言葉。これを持たない要求は断る(他のサイトからの勝手な操作を防ぐ)
 PORT = {"n": 0}
 LAST_SEEN = [time.time()]   # 画面(ブラウザ)が、最後に、問い合わせてきた時刻。画面が開いているかを知るため
@@ -140,6 +144,9 @@ def serialize(vendors):
                     if r.get("doc"):   # 書類全体の問題: 両方の書類の1ページ目を、枠なしで見せる
                         for sd, dd in (("q", q), ("o", o)):
                             if dd and dd.pages and not row.get(sd + "page"): row[sd + "page"] = page_id(dd, 0)
+                    for sd, dd, rr in (("q", q, r["qrow"]), ("o", o, r["orow"])):
+                        if dd and not rr and not r.get("doc") and dd.pages and not row.get(sd + "page"):
+                            row[sd + "page"] = page_id(dd, 0); row[sd + "nomatch"] = True   # 対応する行が見つからなかった側は、書類を、そのまま見せる
                     row["docflag"] = r.get("doc")
                 sp["rows"].append(row)
             sv["pairs"].append(sp)
@@ -165,6 +172,9 @@ def run_job(mode="qo", with_qty=False, gen=0, ev=None):
             vendors[-1]["slot"] = i
             base["n"] += n_in
             if cur(): JOB["done"] = base["n"]
+        if mode == "qo":
+            try: C.cross_hints(vendors)
+            except Exception as e: C.log(f"cross_hints失敗: {e!r}")
         res = serialize(vendors)
         if cur(): JOB["result"] = res; JOB["status"] = "done"
     except C.Cancelled:

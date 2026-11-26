@@ -180,8 +180,9 @@ function rowHtml(r,idx){
 }
 function setDone(i,v){ITEMS[i].done=v;const c=$('chk'+i);if(c)c.checked=v;const r=$('row'+i);if(r)r.classList.toggle('done',v);if(CUR===i)$('vchk').checked=v;todo()}
 /* ---- 確認ビュー: 書類全体に赤枠で位置を示し、要確認を順番に見る ---- */
-function pane(el,pid,box,raw,status){
+function pane(el,pid,box,raw,status,nomatch){
  el.innerHTML='';
+ if(nomatch){const c=document.createElement('div');c.className='warn';c.style.margin='6px';c.textContent='この書類には、対応する行が見つかりませんでした(書類をそのまま出しています。同じ型式が、別の書き方で書いてないか、探してください)';el.appendChild(c)}
  if(pid&&PAGES[pid]){
   const w=document.createElement('div');w.className='pgin';const im=document.createElement('img');im.src=PAGES[pid];
   w.appendChild(im);el.appendChild(w);
@@ -194,7 +195,7 @@ function showV(i){
  const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',OK_IMG:'☑ 画像で一致'}[r.status];
  $('vcnt').textContent=`${i+1} / ${ITEMS.length}`;$('vtitle').textContent=`${it.vendor} ・ ${it.pair}`;
  $('vmsg').innerHTML=`<b>${mark} ${esc(r.model)}</b>${r.msg?' — '+esc(r.msg):''}`;
- $('vql').textContent=ROLES[0]+'(赤枠が、確認する行)';$('vol').textContent=ROLES[1]+'(赤枠が、確認する行)';pane($('vq'),r.qpage,r.qbox,r.qraw,r.status);pane($('vo'),r.opage,r.obox,r.oraw,r.status);
+ $('vql').textContent=ROLES[0]+'(赤枠が、確認する行)';$('vol').textContent=ROLES[1]+'(赤枠が、確認する行)';pane($('vq'),r.qpage,r.qbox,r.qraw,r.status,r.qnomatch);pane($('vo'),r.opage,r.obox,r.oraw,r.status,r.onomatch);
  $('vchk').checked=it.done;$('vprev').disabled=i===0;$('vnext').disabled=i===ITEMS.length-1;
 }
 function openV(i){$('vw').hidden=false;showV(i)}
