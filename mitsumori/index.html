@@ -40,10 +40,11 @@ button.sm.pri{background:var(--pri);color:#fff}
 .vh{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.vh b{font-size:18px}.vh .sp{flex:1}
 #vmsg{margin:6px 0;padding:6px 10px;border-radius:6px;font-size:15px;background:#f1f3f6}
 .vbody{flex:1;display:flex;gap:10px;min-height:0}.pane{flex:1;display:flex;flex-direction:column;min-width:0}.pane>small{color:var(--sub);margin:2px 0}
-.pg{flex:1;overflow:auto;border:1px solid #bcc6d4;border-radius:6px;background:#eef1f5;position:relative}
-.pgin{position:relative;display:inline-block;width:calc(100%*var(--z,1))}.pgin img{width:100%;display:block}
+.pg{flex:1;overflow:hidden;border:1px solid #bcc6d4;border-radius:6px;background:#eef1f5;position:relative;cursor:grab;touch-action:none;user-select:none}.pg.drag{cursor:grabbing}
+.pgin{position:absolute;left:0;top:0;width:100%;transform-origin:0 0}.pgin img{width:100%;display:block;pointer-events:none;-webkit-user-drag:none}
+.pg .warn{position:absolute;left:6px;right:6px;top:6px;z-index:3}
 .bx{position:absolute;border:2px solid #e11d2e;border-radius:2px;box-shadow:0 0 5px rgba(225,29,46,.55);pointer-events:none}
-.bx.OK_IMG{border-color:#2f6fd6;box-shadow:0 0 5px rgba(47,111,214,.55)}
+.bx.REVIEW{border-color:#e8820c;box-shadow:0 0 5px rgba(232,130,12,.6)}.bx.OK_IMG{border-color:#2f6fd6;box-shadow:0 0 5px rgba(47,111,214,.55)}
 .ck{display:inline-block;margin:2px 4px 2px 0;padding:2px 8px;border-radius:12px;font-size:13px;border:1px solid #bcc6d4;background:#fff}.ck.ok{border-color:#2a9d5c;color:#17703f;background:#eefaf3}.ck.ng{border-color:#d33;color:#a11;background:#fff0f0;font-weight:700}.ck.na{color:#667385;background:#f4f6f9}
 .zoom{display:flex;align-items:center;gap:4px}.zoom button{min-width:34px}
 .vf{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:8px}.vf .sp{flex:1}
@@ -88,9 +89,9 @@ button.sm.pri{background:var(--pri);color:#fff}
 <div id="out"></div>
 </main>
 <div class="vw" id="vw" hidden><div class="vbox">
- <div class="vh"><b id="vcnt"></b><span id="vtitle"></span><span class="sp"></span><span class="zoom"><small>拡大・縮小:</small><button class="sm" id="zout" title="縮小">－</button><button class="sm" id="zfit" title="幅に合わせる">100%</button><button class="sm" id="zin" title="拡大">＋</button></span><span class="kbd">キー: ← →=前後 / Enter=確認して次へ / Esc=閉じる / Ctrl+ホイール=拡大縮小</span><button class="sm" id="vx">✕ 閉じる</button></div>
+ <div class="vh"><b id="vcnt"></b><span id="vtitle"></span><span class="sp"></span><span class="zoom"><small>両方を:</small><button class="sm" id="zout" title="縮小">－</button><button class="sm" id="zfit" title="元の大きさ・位置に戻す">元に戻す</button><button class="sm" id="zin" title="拡大">＋</button></span><span class="kbd">画像: ホイール=拡大縮小 / 左クリックを押して引っぱる=移動 / ダブルクリック=元に戻す　キー: ← →=前後 / Enter=確認して次へ / Esc=閉じる</span><button class="sm" id="vx">✕ 閉じる</button></div>
  <div id="vmsg"></div>
- <div class="vbody"><div class="pane"><small id="vql">見積(枠で囲った行が、確認する行)</small><div class="pg" id="vq"></div></div><div class="pane"><small id="vol">発注(枠で囲った行が、確認する行)</small><div class="pg" id="vo"></div></div></div>
+ <div class="vbody"><div class="pane"><small id="vql">見積(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)</small><div class="pg" id="vq"></div></div><div class="pane"><small id="vol">発注(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)</small><div class="pg" id="vo"></div></div></div>
  <div class="vf"><button id="vprev">◀ 前へ</button><label><input type="checkbox" id="vchk"> 確認した</label><span class="sp"></span><button class="go" id="vok">確認した → 次の未確認へ</button><button id="vnext">次へ ▶</button></div>
 </div></div>
 <script>
@@ -179,31 +180,37 @@ function chips(c){return `<span class="chip c-ok">✅ 確実に一致 <b>${c.OK}
 function rowHtml(r,idx){
  const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',OK_IMG:'☑ 画像で一致'}[r.status];
  const side=(lab,img,raw)=>`<div><small>${lab}</small>${img?`<img src="data:image/png;base64,${img}">`:(raw?`<div class="raw">${esc(raw)}</div>`:'<small>(なし)</small>')}</div>`;
- return `<div class="row ${r.status}" id="row${idx}"><label class="chk"><input type="checkbox" id="chk${idx}" onchange="setDone(${idx},this.checked)"> 確認した</label><span class="mdl">${mark} ${esc(r.model)}</span> <button class="sm" onclick="openV(${idx})">書類全体で見る(赤枠)</button>${r.msg?`<div class="msg">${esc(r.msg)}</div>`:''}${r.checks?`<div>${ckHtml(r.checks)}</div>`:''}<div class="two">${side(ROLES[0],r.qimg,r.qraw)}${side(ROLES[1],r.oimg,r.oraw)}</div></div>`;
+ return `<div class="row ${r.status}" id="row${idx}"><label class="chk"><input type="checkbox" id="chk${idx}" onchange="setDone(${idx},this.checked)"> 確認した</label><span class="mdl">${mark} ${esc(r.model)}</span> <button class="sm" onclick="openV(${idx})">書類全体で見る</button>${r.msg?`<div class="msg">${esc(r.msg)}</div>`:''}${r.checks?`<div>${ckHtml(r.checks)}</div>`:''}<div class="two">${side(ROLES[0],r.qimg,r.qraw)}${side(ROLES[1],r.oimg,r.oraw)}</div></div>`;
 }
 function setDone(i,v){ITEMS[i].done=v;const c=$('chk'+i);if(c)c.checked=v;const r=$('row'+i);if(r)r.classList.toggle('done',v);if(CUR===i)$('vchk').checked=v;todo()}
-/* ---- 確認ビュー: 書類全体に赤枠で位置を示し、要確認を順番に見る ---- */
+/* ---- 確認ビュー: 書類全体に枠で位置を示し、要確認を順番に見る ---- */
 function pane(el,pid,box,raw,status,nomatch){
- el.innerHTML='';
- if(nomatch){const c=document.createElement('div');c.className='warn';c.style.margin='6px';c.textContent='この書類には、対応する行が見つかりませんでした(書類をそのまま出しています。同じ型式が、別の書き方で書いてないか、探してください)';el.appendChild(c)}
- if(pid&&PAGES[pid]){
-  const w=document.createElement('div');w.className='pgin';const im=document.createElement('img');im.src=PAGES[pid];
-  w.appendChild(im);el.appendChild(w);
-  if(box){const b=document.createElement('i');b.className='bx '+status;b.style.left=(100*box[0])+'%';b.style.top=(100*box[1])+'%';b.style.width=(100*(box[2]-box[0]))+'%';b.style.height=(100*(box[3]-box[1]))+'%';w.appendChild(b);
-   const go=()=>{el.scrollTop=Math.max(0,box[1]*im.clientHeight-el.clientHeight/3)};im.onload=go;if(im.complete)go();}
- }else el.innerHTML=raw?`<div class="raw" style="padding:10px">${esc(raw)}<br><small>(この書類は画像が無いので、読み取った文字を出しています)</small></div>`:'<div style="padding:10px;color:#667385">(この書類に、対応する行はありません)</div>';
+ el.innerHTML='';el._st={z:1,x:0,y:0};
+ if(nomatch){const c=document.createElement('div');c.className='warn';c.textContent='この書類には、対応する行が見つかりませんでした(書類をそのまま出しています。同じ型式が、別の書き方で書いてないか、探してください)';el.appendChild(c)}
+ if(!(pid&&PAGES[pid])){const d=document.createElement('div');d.style.cssText='padding:10px;color:#667385';d.innerHTML=raw?`<div class="raw">${esc(raw)}<br><small>(この書類は画像が無いので、読み取った文字を出しています)</small></div>`:'(この書類に、対応する行はありません)';el.appendChild(d);return}
+ const st=el._st,w=document.createElement('div');w.className='pgin';const im=document.createElement('img');im.src=PAGES[pid];w.appendChild(im);el.appendChild(w);
+ let b=null;if(box){b=document.createElement('i');b.className='bx '+status;b.style.left=(100*box[0])+'%';b.style.top=(100*box[1])+'%';b.style.width=(100*(box[2]-box[0]))+'%';b.style.height=(100*(box[3]-box[1]))+'%';w.appendChild(b)}
+ const apply=()=>{w.style.transform=`translate(${st.x}px,${st.y}px) scale(${st.z})`;if(b)b.style.borderWidth=Math.max(1,2/st.z)+'px';showZ()};
+ const home=()=>{st.z=1;st.x=0;st.y=0;if(box&&im.clientHeight)st.y=Math.min(0,el.clientHeight/3-box[1]*im.clientHeight);apply()};
+ el._home=home;el._zoomAt=(mx,my,f)=>{const nz=Math.max(0.3,Math.min(10,st.z*f));st.x=mx-(mx-st.x)*(nz/st.z);st.y=my-(my-st.y)*(nz/st.z);st.z=nz;apply()};
+ im.onload=home;if(im.complete)home();
+ el.onwheel=e=>{e.preventDefault();const r=el.getBoundingClientRect();el._zoomAt(e.clientX-r.left,e.clientY-r.top,e.deltaY<0?1.15:1/1.15)};   // マウスのホイールだけで、カーソルの位置を中心に、拡大・縮小
+ let drag=null;
+ el.onpointerdown=e=>{if(e.button!==0)return;drag={x:e.clientX,y:e.clientY,sx:st.x,sy:st.y};el.setPointerCapture(e.pointerId);el.classList.add('drag')};   // 左クリックを押したまま引っ張ると、動かせる
+ el.onpointermove=e=>{if(!drag)return;st.x=drag.sx+(e.clientX-drag.x);st.y=drag.sy+(e.clientY-drag.y);apply()};
+ const end=e=>{drag=null;el.classList.remove('drag')};el.onpointerup=end;el.onpointercancel=end;
+ el.ondblclick=home;   // ダブルクリックで、元の位置・大きさに戻る
 }
-let ZOOM=1;
-function setZoom(z){ZOOM=Math.max(0.5,Math.min(5,z));$('vq').style.setProperty('--z',ZOOM);$('vo').style.setProperty('--z',ZOOM);$('zfit').textContent=Math.round(ZOOM*100)+'%'}
-$('zin').onclick=()=>setZoom(ZOOM*1.25);$('zout').onclick=()=>setZoom(ZOOM/1.25);$('zfit').onclick=()=>setZoom(1);
-['vq','vo'].forEach(id=>$(id).addEventListener('wheel',e=>{if(e.ctrlKey){e.preventDefault();setZoom(ZOOM*(e.deltaY<0?1.1:1/1.1))}},{passive:false}));
+function showZ(){}
+function zoomBoth(f){['vq','vo'].forEach(id=>{const el=$(id);if(el._zoomAt)el._zoomAt(el.clientWidth/2,el.clientHeight/2,f)})}
+$('zin').onclick=()=>zoomBoth(1.25);$('zout').onclick=()=>zoomBoth(1/1.25);$('zfit').onclick=()=>['vq','vo'].forEach(id=>{const el=$(id);if(el._home)el._home()});
 const ckHtml=cs=>cs?cs.map(c=>`<span class="ck ${c[1]}" title="${esc(c[2]||'')}">${esc(c[0])} ${c[1]==='ok'?'○':(c[1]==='ng'?'✕':'ー')}${c[1]!=='ok'&&c[2]?'('+esc(c[2])+')':''}</span>`).join(''):'';
 function showV(i){
  if(i<0||i>=ITEMS.length)return;CUR=i;const it=ITEMS[i],r=it.row;
  const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',OK_IMG:'☑ 画像で一致'}[r.status];
  $('vcnt').textContent=`${i+1} / ${ITEMS.length}`;$('vtitle').textContent=`${it.vendor} ・ ${it.pair}`;
  $('vmsg').innerHTML=`<b>${mark} ${esc(r.model)}</b>${r.msg?' — '+esc(r.msg):''}<div>${ckHtml(r.checks)}</div>`;
- $('vql').textContent=ROLES[0]+'(枠で囲った行が、確認する行)';$('vol').textContent=ROLES[1]+'(枠で囲った行が、確認する行)';pane($('vq'),r.qpage,r.qbox,r.qraw,r.status,r.qnomatch);pane($('vo'),r.opage,r.obox,r.oraw,r.status,r.onomatch);
+ $('vql').textContent=ROLES[0]+'(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)';$('vol').textContent=ROLES[1]+'(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)';pane($('vq'),r.qpage,r.qbox,r.qraw,r.status,r.qnomatch);pane($('vo'),r.opage,r.obox,r.oraw,r.status,r.onomatch);
  $('vchk').checked=it.done;$('vprev').disabled=i===0;$('vnext').disabled=i===ITEMS.length-1;
 }
 function openV(i){$('vw').hidden=false;showV(i)}
@@ -214,7 +221,7 @@ $('vchk').onchange=e=>setDone(CUR,e.target.checked);
 $('vok').onclick=()=>{setDone(CUR,true);const j=nextUndone(CUR);if(j<0){alert('確認が必要な行は、全部、確認しました');$('vw').hidden=true}else showV(j)};
 document.addEventListener('keydown',e=>{if($('vw').hidden)return;if(e.key==='ArrowRight')showV(CUR+1);else if(e.key==='ArrowLeft')showV(CUR-1);else if(e.key==='Enter'){e.preventDefault();$('vok').click()}else if(e.key==='Escape')$('vx').click()});
 function todo(){const n=ITEMS.filter(x=>!x.done).length,e=$('todo');if(!e)return;
- e.innerHTML=ITEMS.length?`確認が必要な行: ${ITEMS.length}行のうち、未確認 ${n}行 <button class="sm pri" onclick="const j=nextUndone(-1);if(j>=0)openV(j)" ${n?'':'disabled'}>確認を始める(書類全体に赤枠・順番に)</button>`:'確認が必要な行はありません'}
+ e.innerHTML=ITEMS.length?`確認が必要な行: ${ITEMS.length}行のうち、未確認 ${n}行 <button class="sm pri" onclick="const j=nextUndone(-1);if(j>=0)openV(j)" ${n?'':'disabled'}>確認を始める(書類全体に枠・順番に)</button>`:'確認が必要な行はありません'}
 $('save').onclick=async()=>{const css=document.querySelector('style').textContent;const html=`<!doctype html><meta charset="utf-8"><title>照合結果</title><style>${css}</style><body><main>${$('out').innerHTML}</main>`;try{const r=await api('/api/savehtml',{method:'POST',body:new Blob([html],{type:'text/html'})});alert('デスクトップに保存しました:\n'+r.path)}catch(e){alert('保存できませんでした: '+e.message)}};
 async function health(n){try{const h=await api('/api/health');if(h.state==='checking'&&n<20){setTimeout(()=>health(n+1),1500);return}if(h.state==='done'&&!h.ok){const bad=[!h.rapid?'RapidOCR':'',!h.tess?'Tesseract':''].filter(x=>x).join('・');$('hl').hidden=false;$('hl').textContent='⚠ 画像(スキャン)を読み取る部品が、このパソコンで動いていません('+bad+')。文字入りのPDFとExcelは使えますが、画像・スキャンの書類は、全部「要確認」になります。'+(h.msg?' 詳細: '+h.msg:'')}}catch(e){}}
 function setMode(m){
