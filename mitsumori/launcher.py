@@ -209,6 +209,10 @@ def smoke(outpath):
         S.clean_old_runs()
         chk("閉じたアプリの古い作業フォルダだけを消し、自分の分は、消さない", (not os.path.exists(dead)) and os.path.exists(mine))
 
+        # 6.5 画面が開いている間は、アプリが動き続ける(画面からの問い合わせで、時刻が更新される)
+        t_before = S.LAST_SEEN[0]; time.sleep(1.1); call("/api/state")
+        chk("画面からの問い合わせで、「画面が開いている」と、アプリが、わかる", S.LAST_SEEN[0] > t_before)
+
         # 7 リセット
         call("/api/reset?mode=qo", "POST", b""); stt = call("/api/state?mode=qo")[1]
         chk("全部リセットで、書類が空になる", all(not s["見積"] and not s["発注"] for s in stt["slots"]) and stt["job"]["status"] == "idle")
@@ -242,13 +246,21 @@ def main():
         reason = f"{type(e).__name__}: {e}"
         mc_core.log("専用の窓を開けなかった(ブラウザで開く): " + traceback.format_exc())   # 黙って握りつぶさない
         webbrowser.open(url)
+        idle = int(os.environ.get("MC_IDLE_EXIT") or 180)   # 画面(ブラウザ)が、この秒数、開かれていなければ、自動で終了する
         try:
             import tkinter
-            r = tkinter.Tk(); r.title("見積・発注 照合"); r.geometry("520x210")
-            tkinter.Label(r, text="専用の窓を開けなかったため、ブラウザで画面を開きました。\n使い方は、同じです。この窓を閉じると、終了します(書類も消えます)。\n\n理由(開発者に伝えてください):\n" + reason[:160], pady=18, wraplength=480, justify="left").pack()
-            r.mainloop()
+            r = tkinter.Tk(); r.title("見積・発注 照合"); r.geometry("560x300")
+            tkinter.Label(r, text="専用の窓を開けなかったため、ブラウザで画面を開きました。使い方は、同じです。\n\n■ この小さい窓は、閉じても(最小化しても)大丈夫です。アプリは、動き続けます。\n■ 終わるときは、下の「終了する」を押すか、ブラウザの画面を全部閉じて、3分待ってください。\n■ ブラウザの画面が消えたときは、「画面を開き直す」を押してください。\n   (古い画面や、ブックマークは、使えません)\n\n理由(開発者に伝えてください):\n" + reason[:160], pady=10, wraplength=520, justify="left").pack()
+            bf = tkinter.Frame(r); bf.pack(pady=6)
+            tkinter.Button(bf, text="画面を開き直す", command=lambda: webbrowser.open(url)).pack(side="left", padx=8)
+            tkinter.Button(bf, text="終了する(書類も消えます)", command=r.destroy).pack(side="left", padx=8)
+            r.protocol("WM_DELETE_WINDOW", r.iconify)   # ×を押しても終了しない(うっかり閉じて、画面が使えなくなるのを防ぐ)
+            def tick():
+                if time.time() - server.LAST_SEEN[0] > idle: r.destroy(); return
+                r.after(3000, tick)
+            r.after(3000, tick); r.mainloop()
         except Exception:
-            while True: time.sleep(3600)
+            while time.time() - server.LAST_SEEN[0] <= idle: time.sleep(2)   # 窓が出せないときも、画面が開かれている間は、動き続ける
     import shutil
     shutil.rmtree(server.WORK, ignore_errors=True)   # 終了時に、作業中の書類を全部消す
 

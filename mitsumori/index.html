@@ -100,7 +100,7 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;',
 const TK=new URLSearchParams(location.search).get('t')||'';
 async function api(path,opt){opt=Object.assign({},opt);opt.headers=Object.assign({'X-MC-Token':TK},opt.headers||{});const r=await fetch(path,opt);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j}
 let SEQ=0, FAILS=0;
-async function refresh(){const my=++SEQ;let st;try{st=await api('/api/state?mode='+MODE);FAILS=0;$('conn').hidden=true}catch(e){if(++FAILS>=3){$('conn').hidden=false;$('conn').textContent='⚠ このアプリとの接続が切れました。アプリが終了したか、止まっています。アプリを閉じて、もう一度、開いてください(入れた書類は、入れ直しになります)。'}return}if(my<SEQ)return;ST=st;render()}   // 遅れて届いた古い返事は、捨てる
+async function refresh(){const my=++SEQ;let st;try{st=await api('/api/state?mode='+MODE);FAILS=0;$('conn').hidden=true}catch(e){if(++FAILS>=3){$('conn').hidden=false;$('conn').textContent='⚠ このアプリとの接続が切れました。アプリが終了したか、止まっています。デスクトップのアプリ(MitsumoriCheck.exe)を、もう一度、開き直してください。新しく出る画面を使ってください(この画面や、ブックマークは、もう使えません)。入れた書類は、入れ直しになります。'}return}if(my<SEQ)return;ST=st;render()}   // 遅れて届いた古い返事は、捨てる
 function render(){
  $('ver').textContent=ST.version;
  const j=ST.job,running=j.status==='running';
