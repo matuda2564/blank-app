@@ -117,11 +117,11 @@ def serialize(vendors):
         return pid[k] if pages.get(pid[k]) else None
 
     for v in vendors:
-        sv = {"vendor": v["vendor"], "warnings": v["warnings"], "pairs": [], "seconds": round(v.get("seconds", 0), 1),
+        sv = {"vendor": v["vendor"], "slot": v.get("slot"), "warnings": v["warnings"], "pairs": [], "seconds": round(v.get("seconds", 0), 1),
               "count": {"OK": 0, "OK_IMG": 0, "DIFF": 0, "REVIEW": 0, "NOPAIR": 0}}
         for p in v["pairs"]:
             q, o = p["q"], p["o"]
-            sp = {"q": q.name if q else None, "o": o.name if o else None, "why": p["why"], "compared": p["compared"], "skipped": p["skipped"], "skipnote": p.get("skipnote"), "rows": []}
+            sp = {"q": q.name if q else None, "o": o.name if o else None, "why": p["why"], "compared": p["compared"], "skipped": p["skipped"], "skipnote": p.get("skipnote"), "qread": C.doc_info(q), "oread": C.doc_info(o), "rows": []}
             if not (q and o):
                 sv["count"]["NOPAIR"] += 1
             for r in p["results"]:
@@ -161,6 +161,7 @@ def run_job(mode="qo", with_qty=False, gen=0, ev=None):
                 if cur(): JOB["done"] = base["n"] + done
             n_in = sum(len(os.listdir(slot_dir(i, r))) for r in RL if os.path.isdir(slot_dir(i, r)))
             vendors.append(C.run_vendor(slot_dir(i), workers=C.auto_workers(), progress=prog, name=NAMES[mode][i], mode=mode, with_qty=with_qty, cancel=cancel))
+            vendors[-1]["slot"] = i
             base["n"] += n_in
             if cur(): JOB["done"] = base["n"]
         res = serialize(vendors)
@@ -254,6 +255,20 @@ class H(BaseHTTPRequestHandler):
                 JOB["gen"] += 1; ev = threading.Event()
                 JOB.update(status="running", done=0, total=0, msg="", result=None, t0=time.time(), sec=0, mode=mode, ev=ev)
                 threading.Thread(target=run_job, args=(mode, wq, JOB["gen"], ev), daemon=True).start()
+                return self._send(200, {"ok": True})
+            if u.path == "/api/move":   # 見積⇔発注の枠に入れた「見積同士」の書類を、見積⇔見積の枠へ移す(見積の枠→客先見積 / 発注の枠→仕入先見積)
+                if JOB["status"] == "running": return self._send(409, {"error": "照合中です。終わってからにしてください"})
+                i = int(q["slot"]); assert 1 <= i <= NSLOT
+                for a, b in (("見積", "客先見積"), ("発注", "仕入先見積")):
+                    src, dst = slot_dir(i, a), slot_dir(i, b)
+                    if not os.path.isdir(src): continue
+                    os.makedirs(dst, exist_ok=True)
+                    for fn in os.listdir(src):
+                        t = os.path.join(dst, fn); k = 1
+                        while os.path.exists(t):
+                            bs, ex = os.path.splitext(fn); t = os.path.join(dst, f"{bs}({k}){ex}"); k += 1
+                        shutil.move(os.path.join(src, fn), t)
+                JOB.update(status="idle", done=0, total=0, msg="", result=None, sec=0)
                 return self._send(200, {"ok": True})
             if u.path == "/api/cancel":   # 中止: 読み取りが止まったときも、これで、元に戻れる
                 if JOB["status"] == "running":

@@ -166,6 +166,20 @@ def smoke(outpath):
         r = call("/api/result")[1]; c3 = r["result"]["vendors"][0]["count"] if r.get("result") else {}
         chk("見積⇔見積: 単価・合計が違っても、型式の違い(2件)だけを出す", j["status"] == "done" and c3.get("DIFF") == 2 and c3.get("OK") == 2, c3)
 
+        # 3.5 見積同士を「見積⇔発注」に入れたとき、気づけて、移せる / 判断の基準が、画面から、わかる
+        call("/api/reset?mode=qo", "POST", b"")
+        up("qo", 4, "見積", "a.pdf", pdf("御見積書", A)); up("qo", 4, "発注", "b.pdf", pdf("お見積り", B))
+        call("/api/run?mode=qo", "POST", b""); wait()
+        vv = call("/api/result")[1]["result"]["vendors"][0]
+        chk("見積同士を「見積⇔発注」に入れたら、「見積⇔見積のタブを使う」と案内する", any("見積 ⇔ 見積" in w for w in vv["warnings"]), vv["warnings"])
+        chk("組にならなかった理由が、数字つきで、わかる", any("重なり" in x["why"] for x in vv["pairs"]), [x["why"] for x in vv["pairs"]])
+        chk("ツールが書類から読んだ中身(型式・数量)が、画面用に、出る", any((x.get("qread") or x.get("oread") or {}).get("rows") for x in vv["pairs"]))
+        chk("社の番号が、結果に入っている(移すボタン用)", vv.get("slot") == 4, vv.get("slot"))
+        mv = call("/api/move?slot=4", "POST", b"")[0]
+        qs = call("/api/state?mode=qq")[1]["slots"][3]
+        chk("ボタン1つで、見積⇔見積のタブへ書類を移せる", mv == 200 and qs["客先見積"] == ["a.pdf"] and qs["仕入先見積"] == ["b.pdf"], qs)
+        call("/api/reset?mode=qq", "POST", b"")
+
         # 4 中止(止まったときの、逃げ道)
         call("/api/reset?mode=qo", "POST", b""); call("/api/reset?mode=qq", "POST", b"")
         d = fitz.open()
