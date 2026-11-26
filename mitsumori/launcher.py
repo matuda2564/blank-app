@@ -7,9 +7,39 @@ import os, sys, threading, webbrowser, time, io, traceback
 
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-# 同梱した Tesseract があれば、それを使う
+def _is_ascii(p):
+    try:
+        p.encode("ascii"); return True
+    except UnicodeEncodeError:
+        return False
+
+
+def _ascii_copy_of(src):
+    """Tesseract は、日本語の名前の場所に置くと、動かない(Windows)。英数字だけの場所に、コピーして使う。
+    初回だけコピーし、2回目からは、コピー済みを使う(アプリが、日本語の名前のフォルダや、日本語のユーザー名の下にあっても、動くように)"""
+    import shutil
+    for base in (os.environ.get("PUBLIC"), os.environ.get("ProgramData"), r"C:\Users\Public", r"C:\ProgramData"):
+        try:
+            if not base or not _is_ascii(base) or not os.path.isdir(base): continue
+            dst = os.path.join(base, "mitsumori_check_tess")
+            stamp = os.path.join(dst, "stamp.txt")
+            sig = str(os.path.getsize(os.path.join(src, "tesseract.exe")))
+            ok = os.path.exists(stamp) and open(stamp).read() == sig and os.path.exists(os.path.join(dst, "tesseract.exe"))
+            if not ok:
+                shutil.rmtree(dst, ignore_errors=True)
+                shutil.copytree(src, dst)
+                open(stamp, "w").write(sig)
+            return dst
+        except Exception:
+            continue
+    return None
+
+
+# 同梱した Tesseract があれば、それを使う(置き場所が日本語の名前なら、英数字だけの場所に、コピーして使う)
 _t = os.path.join(BASE, "tesseract")
 if os.path.isdir(_t):
+    if not _is_ascii(_t):
+        _t = _ascii_copy_of(_t) or _t
     exe = os.path.join(_t, "tesseract.exe")
     if os.path.exists(exe):
         os.environ["MC_TESSERACT"] = exe

@@ -408,7 +408,10 @@ def ocr_tess(img):
         env = dict(os.environ, OMP_THREAD_LIMIT="1")
         try:
             kw = {"creationflags": 0x08000000} if os.name == "nt" else {}   # Windows: 黒い窓を出さない
-            out = subprocess.run([TESS_EXE, p, "stdout", "-l", "jpn+eng", "--psm", "6", "tsv"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=25, **kw).stdout
+            cp = subprocess.run([TESS_EXE, p, "stdout", "-l", "jpn+eng", "--psm", "6", "tsv"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=25, **kw)
+            out = cp.stdout
+            if not (out or "").strip():
+                log(f"Tesseractの出力が空(終了コード{cp.returncode}): {(cp.stderr or '')[:300]} / exe={TESS_EXE} / tessdata={os.environ.get('TESSDATA_PREFIX')}")
         except subprocess.TimeoutExpired:
             log("Tesseractが時間切れ"); return []   # 時間切れ → 読み取りなし(=要確認になる。黙って通さない)
         except Exception as e:
