@@ -47,14 +47,23 @@ button.sm.pri{background:var(--pri);color:#fff}
 .vf{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:8px}.vf .sp{flex:1}
 .vf button{font:inherit;font-size:16px;padding:10px 18px;border-radius:8px;border:2px solid var(--pri);background:#fff;color:var(--pri);cursor:pointer;font-weight:700}.vf button.go{background:var(--pri);color:#fff}
 .vf label{font-size:16px;cursor:pointer}.kbd{font-size:12px;color:var(--sub)}
-@media print{header,.slots,.bar,.note{display:none}}
+.tabs{display:flex;gap:6px;padding:10px 20px 0;flex-wrap:wrap}
+.tabs button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px 8px 0 0;padding:9px 16px;font:inherit;font-size:14px;cursor:pointer}
+.tabs button.on{background:var(--pri);color:#fff;border-color:var(--pri);font-weight:700}
+.opt{margin:8px 0;font-size:14px}.opt small{color:var(--sub)}
+@media print{header,.slots,.bar,.note,.tabs,.opt{display:none}}
 </style></head><body>
-<header><h1>見積・発注 照合</h1><small id="ver"></small><small>書類はこのパソコンの中だけで処理します(外には送りません)</small></header>
+<header><h1 id="ttl">見積・発注 照合</h1><small id="ver"></small><small>書類はこのパソコンの中だけで処理します(外には送りません)</small></header>
+<nav class="tabs"><button id="tab-qo" class="on">見積 ⇔ 発注</button><button id="tab-qq">見積 ⇔ 見積(客先に出した見積 と 仕入先の見積)</button></nav>
 <main>
-<div class="note">
+<div class="note" id="note-qq" hidden>
+<b>使い方</b>: ①社ごとの枠に、<b>客先に出した見積書</b>と<b>仕入先の見積書</b>を入れる(ドラッグ、またはクリックして選ぶ。PDF・Excel・画像) → ②<b>「照合する」</b> → ③結果を上から確認 → ④終わったら<b>「この社をリセット」</b>で次の社へ。<br>比べるのは、<b>型式</b>と<b>品名</b>だけです。<b>単価・金額・合計・納期・単位は、違って当たり前なので、比べません</b>。数量は、下のチェックを入れたときだけ比べます。<br><b>✅ 型式が一致</b> / <b>❌ 片方にだけある型式</b> / <b>⚠ 要確認</b>=近い型式(1〜2文字の違い)・品名の違い・読み取りに自信がない。<b>✅以外は、必ず人が見てください。</b>画像の書類は、似た文字(0とO、1とI)の読み違いを、完全には防げません。
+</div>
+<div class="note" id="note-qo">
 <b>使い方</b>: ①社ごとの枠に、<b>見積書</b>と<b>発注書</b>を入れる(ドラッグ、またはクリックして選ぶ。PDF・Excel・画像) → ②<b>「照合する」</b> → ③結果を上から確認 → ④終わったら<b>「全部リセット」</b>。<br>
 <b>✅ 確実に一致</b>=文字入りPDF・Excelで全項目が一致 / <b>☑ 画像で一致</b>=画像を2種類の読み取りで確認。<b>似た文字(0とO、1とI)の読み違いは完全には防げない</b>ので、画像を見て確認してください / <b>❌ 違い</b> / <b>⚠ 要確認</b>=読み取れない・自信がない。<b>✅以外は、必ず人が見てください。</b>
 </div>
+<div class="opt" id="qtyrow" hidden><label><input type="checkbox" id="qty"> 数量も比べる</label> <small>(チェックなし=型式と品名だけ)</small></div>
 <div class="slots" id="slots"></div>
 <div class="bar">
 <button class="big go" id="go">照合する</button>
@@ -67,17 +76,19 @@ button.sm.pri{background:var(--pri);color:#fff}
 <div class="vw" id="vw" hidden><div class="vbox">
  <div class="vh"><b id="vcnt"></b><span id="vtitle"></span><span class="sp"></span><span class="kbd">キー: ← →=前後 / Enter=確認して次へ / Esc=閉じる</span><button class="sm" id="vx">✕ 閉じる</button></div>
  <div id="vmsg"></div>
- <div class="vbody"><div class="pane"><small>見積(赤枠が、確認する行)</small><div class="pg" id="vq"></div></div><div class="pane"><small>発注(赤枠が、確認する行)</small><div class="pg" id="vo"></div></div></div>
+ <div class="vbody"><div class="pane"><small id="vql">見積(赤枠が、確認する行)</small><div class="pg" id="vq"></div></div><div class="pane"><small id="vol">発注(赤枠が、確認する行)</small><div class="pg" id="vo"></div></div></div>
  <div class="vf"><button id="vprev">◀ 前へ</button><label><input type="checkbox" id="vchk"> 確認した</label><span class="sp"></span><button class="go" id="vok">確認した → 次の未確認へ</button><button id="vnext">次へ ▶</button></div>
 </div></div>
 <script>
-const $=id=>document.getElementById(id), ROLES=['見積','発注'];
+const $=id=>document.getElementById(id);
+const MODES={qo:{roles:['見積','発注'],title:'見積・発注 照合'},qq:{roles:['客先見積','仕入先見積'],title:'見積 ⇔ 見積 照合(客先と仕入先)'}};
+let MODE='qo', ROLES=MODES.qo.roles;
 let ST=null, timer=null, PAGES={}, ITEMS=[], CUR=-1;
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const TK=new URLSearchParams(location.search).get('t')||'';
 async function api(path,opt){opt=Object.assign({},opt);opt.headers=Object.assign({'X-MC-Token':TK},opt.headers||{});const r=await fetch(path,opt);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j}
 let SEQ=0;
-async function refresh(){const my=++SEQ;let st;try{st=await api('/api/state')}catch(e){return}if(my<SEQ)return;ST=st;render()}   // 遅れて届いた古い返事は、捨てる
+async function refresh(){const my=++SEQ;let st;try{st=await api('/api/state?mode='+MODE)}catch(e){return}if(my<SEQ)return;ST=st;render()}   // 遅れて届いた古い返事は、捨てる
 function render(){
  $('ver').textContent=ST.version;
  const j=ST.job,running=j.status==='running';
@@ -96,7 +107,7 @@ function render(){
   z.ondragover=e=>{e.preventDefault();z.classList.add('over')};z.ondragleave=()=>z.classList.remove('over');
   z.ondrop=e=>{e.preventDefault();z.classList.remove('over');if(ST.job.status!=='running')up(z.dataset.slot,z.dataset.role,e.dataTransfer.files)};
  });
- const has=ST.slots.some(s=>s['見積'].length&&s['発注'].length);
+ const has=ST.slots.some(s=>s[ROLES[0]].length&&s[ROLES[1]].length);
  $('go').disabled=running||!has; $('reset').disabled=running;
  const pct=j.total?Math.round(100*j.done/j.total):0;
  $('pb').style.width=(running?pct:(j.status==='done'?100:0))+'%';
@@ -104,20 +115,21 @@ function render(){
 }
 async function up(slot,role,files){
  for(const f of files){
-  try{await api(`/api/upload?slot=${slot}&role=${encodeURIComponent(role)}&name=${encodeURIComponent(f.name)}`,{method:'POST',body:f})}catch(e){alert(f.name+': '+e.message)}
+  try{await api(`/api/upload?mode=${MODE}&slot=${slot}&role=${encodeURIComponent(role)}&name=${encodeURIComponent(f.name)}`,{method:'POST',body:f})}catch(e){alert(f.name+': '+e.message)}
  }
  $('out').innerHTML='';$('save').style.display='none';await refresh();
 }
-async function rm(slot,role,name){await api(`/api/remove?slot=${slot}&role=${encodeURIComponent(role)}&name=${encodeURIComponent(name)}`,{method:'POST'});$('out').innerHTML='';$('save').style.display='none';refresh()}
-async function resetSlot(slot){const n=(ST.slots.find(x=>x.id===slot)||{}).name||'この社';if(!confirm(n+'の書類と結果を消します。よろしいですか?'))return;try{await api(`/api/reset?slot=${slot}`,{method:'POST'})}catch(e){alert(e.message)}$('out').innerHTML='';$('save').style.display='none';refresh()}
-async function rename(slot,name){await api(`/api/name?slot=${slot}&name=${encodeURIComponent(name)}`,{method:'POST'})}
-$('go').onclick=async()=>{try{await api('/api/run',{method:'POST'});$('out').innerHTML='';$('save').style.display='none';poll()}catch(e){alert(e.message)}};
-$('reset').onclick=async()=>{if(!confirm('書類も結果も、全部消します。よろしいですか?'))return;await api('/api/reset',{method:'POST'});$('out').innerHTML='';$('save').style.display='none';refresh()};
+async function rm(slot,role,name){await api(`/api/remove?mode=${MODE}&slot=${slot}&role=${encodeURIComponent(role)}&name=${encodeURIComponent(name)}`,{method:'POST'});$('out').innerHTML='';$('save').style.display='none';refresh()}
+async function resetSlot(slot){const n=(ST.slots.find(x=>x.id===slot)||{}).name||'この社';if(!confirm(n+'の書類と結果を消します。よろしいですか?'))return;try{await api(`/api/reset?mode=${MODE}&slot=${slot}`,{method:'POST'})}catch(e){alert(e.message)}$('out').innerHTML='';$('save').style.display='none';refresh()}
+async function rename(slot,name){await api(`/api/name?mode=${MODE}&slot=${slot}&name=${encodeURIComponent(name)}`,{method:'POST'})}
+$('go').onclick=async()=>{try{await api(`/api/run?mode=${MODE}&qty=${$('qty').checked?1:0}`,{method:'POST'});$('out').innerHTML='';$('save').style.display='none';poll()}catch(e){alert(e.message)}};
+$('reset').onclick=async()=>{if(!confirm('書類も結果も、全部消します。よろしいですか?'))return;await api(`/api/reset?mode=${MODE}`,{method:'POST'});$('out').innerHTML='';$('save').style.display='none';refresh()};
 let POLLING=false;
 async function poll(){if(POLLING)return;POLLING=true;try{for(;;){await refresh();if(ST.job.status!=='running')break;await new Promise(r=>setTimeout(r,800))}}finally{POLLING=false}await showResult()}
 setInterval(()=>{if(!POLLING)refresh()},4000)   // 画面と裏の状態が食い違ったまま固まらないよう、ときどき合わせる
 async function showResult(){
  const r=await api('/api/result');
+ if(r.mode&&r.mode!==MODE)return;   // 別の使い方の結果は、ここには出さない
  if(r.status==='error'){$('out').innerHTML=`<div class="err">照合に失敗しました: ${esc(r.msg)}</div>`;return}
  if(r.status!=='done')return;
  const R=r.result.vendors;PAGES=r.result.pages||{};ITEMS=[];
@@ -127,13 +139,13 @@ async function showResult(){
   h+=`<div class="vendor"><h2>${esc(v.vendor)}</h2><div class="chips">${chips(v.count)}</div>`;
   v.warnings.forEach(w=>h+=`<div class="warn">⚠ ${esc(w)}</div>`);
   for(const p of v.pairs){
-   h+=`<div class="pair"><div class="tt">見積「${esc(p.q||'(なし)')}」 ⇔ 発注「${esc(p.o||'(なし)')}」 <span class="meta">(${esc(p.why)})</span></div>`;
+   h+=`<div class="pair"><div class="tt">${ROLES[0]}「${esc(p.q||'(なし)')}」 ⇔ ${ROLES[1]}「${esc(p.o||'(なし)')}」 <span class="meta">(${esc(p.why)})</span></div>`;
    if(!(p.q&&p.o)){h+=`<div class="row REVIEW">⚠ 組みにならなかった書類です。人が確認してください。</div></div>`;continue}
-   h+=`<div class="meta">比べた項目: ${esc(p.compared.join('・'))}${p.skipped.length?` / 比べなかった項目(片方の書類に無い): ${esc(p.skipped.join('・'))}`:''}</div>`;
+   h+=`<div class="meta">比べた項目: ${esc(p.compared.join('・'))}${p.skipnote?` / 比べない項目: ${esc(p.skipnote)}`:(p.skipped.length?` / 比べなかった項目(片方の書類に無い): ${esc(p.skipped.join('・'))}`:'')}</div>`;
    const order={DIFF:0,REVIEW:1,OK_IMG:2,OK:3};
    const rows=p.rows.slice().sort((a,b)=>order[a.status]-order[b.status]);
    const okr=rows.filter(r=>r.status==='OK');
-   rows.filter(r=>r.status!=='OK').forEach(r=>{ITEMS.push({row:r,vendor:v.vendor,pair:`見積「${p.q}」⇔発注「${p.o}」`,done:false});h+=rowHtml(r,ITEMS.length-1)});
+   rows.filter(r=>r.status!=='OK').forEach(r=>{ITEMS.push({row:r,vendor:v.vendor,pair:`${ROLES[0]}「${p.q}」⇔${ROLES[1]}「${p.o}」`,done:false});h+=rowHtml(r,ITEMS.length-1)});
    if(okr.length)h+=`<details><summary>✅ 確実に一致した行 (${okr.length}行)</summary>${okr.map(r=>`<div class="row OK">${esc(r.model)}</div>`).join('')}</details>`;
    h+=`</div>`;
   }
@@ -145,7 +157,7 @@ function chips(c){return `<span class="chip c-ok">✅ 確実に一致 <b>${c.OK}
 function rowHtml(r,idx){
  const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',OK_IMG:'☑ 画像で一致'}[r.status];
  const side=(lab,img,raw)=>`<div><small>${lab}</small>${img?`<img src="data:image/png;base64,${img}">`:(raw?`<div class="raw">${esc(raw)}</div>`:'<small>(なし)</small>')}</div>`;
- return `<div class="row ${r.status}" id="row${idx}"><label class="chk"><input type="checkbox" id="chk${idx}" onchange="setDone(${idx},this.checked)"> 確認した</label><span class="mdl">${mark} ${esc(r.model)}</span> <button class="sm" onclick="openV(${idx})">書類全体で見る(赤枠)</button>${r.msg?`<div class="msg">${esc(r.msg)}</div>`:''}<div class="two">${side('見積',r.qimg,r.qraw)}${side('発注',r.oimg,r.oraw)}</div></div>`;
+ return `<div class="row ${r.status}" id="row${idx}"><label class="chk"><input type="checkbox" id="chk${idx}" onchange="setDone(${idx},this.checked)"> 確認した</label><span class="mdl">${mark} ${esc(r.model)}</span> <button class="sm" onclick="openV(${idx})">書類全体で見る(赤枠)</button>${r.msg?`<div class="msg">${esc(r.msg)}</div>`:''}<div class="two">${side(ROLES[0],r.qimg,r.qraw)}${side(ROLES[1],r.oimg,r.oraw)}</div></div>`;
 }
 function setDone(i,v){ITEMS[i].done=v;const c=$('chk'+i);if(c)c.checked=v;const r=$('row'+i);if(r)r.classList.toggle('done',v);if(CUR===i)$('vchk').checked=v;todo()}
 /* ---- 確認ビュー: 書類全体に赤枠で位置を示し、要確認を順番に見る ---- */
@@ -163,7 +175,7 @@ function showV(i){
  const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',OK_IMG:'☑ 画像で一致'}[r.status];
  $('vcnt').textContent=`${i+1} / ${ITEMS.length}`;$('vtitle').textContent=`${it.vendor} ・ ${it.pair}`;
  $('vmsg').innerHTML=`<b>${mark} ${esc(r.model)}</b>${r.msg?' — '+esc(r.msg):''}`;
- pane($('vq'),r.qpage,r.qbox,r.qraw,r.status);pane($('vo'),r.opage,r.obox,r.oraw,r.status);
+ $('vql').textContent=ROLES[0]+'(赤枠が、確認する行)';$('vol').textContent=ROLES[1]+'(赤枠が、確認する行)';pane($('vq'),r.qpage,r.qbox,r.qraw,r.status);pane($('vo'),r.opage,r.obox,r.oraw,r.status);
  $('vchk').checked=it.done;$('vprev').disabled=i===0;$('vnext').disabled=i===ITEMS.length-1;
 }
 function openV(i){$('vw').hidden=false;showV(i)}
@@ -176,5 +188,14 @@ document.addEventListener('keydown',e=>{if($('vw').hidden)return;if(e.key==='Arr
 function todo(){const n=ITEMS.filter(x=>!x.done).length,e=$('todo');if(!e)return;
  e.innerHTML=ITEMS.length?`確認が必要な行: ${ITEMS.length}行のうち、未確認 ${n}行 <button class="sm pri" onclick="const j=nextUndone(-1);if(j>=0)openV(j)" ${n?'':'disabled'}>確認を始める(書類全体に赤枠・順番に)</button>`:'確認が必要な行はありません'}
 $('save').onclick=()=>{const css=document.querySelector('style').textContent;const html=`<!doctype html><meta charset="utf-8"><title>照合結果</title><style>${css}</style><body><main>${$('out').innerHTML}</main>`;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([html],{type:'text/html'}));a.download='照合結果_'+new Date().toISOString().slice(0,16).replace(/[:T]/g,'')+'.html';a.click()};
-refresh().then(()=>{if(ST&&ST.job.status==='running')poll()});
+function setMode(m){
+ MODE=m;ROLES=MODES[m].roles;
+ $('tab-qo').classList.toggle('on',m==='qo');$('tab-qq').classList.toggle('on',m==='qq');
+ $('ttl').textContent=MODES[m].title;$('note-qo').hidden=m!=='qo';$('note-qq').hidden=m!=='qq';$('qtyrow').hidden=m!=='qq';
+ $('out').innerHTML='';$('save').style.display='none';$('vw').hidden=true;ITEMS=[];
+ try{history.replaceState(null,'','#'+m)}catch(e){}
+ refresh().then(()=>{if(!ST)return;if(ST.job.status==='running')poll();else if(ST.job.status==='done'&&ST.job.mode===MODE)showResult()});
+}
+$('tab-qo').onclick=()=>setMode('qo');$('tab-qq').onclick=()=>setMode('qq');
+setMode(location.hash==='#qq'?'qq':'qo');
 </script></body></html>

@@ -747,6 +747,63 @@ def compare(q, o):
     return res, [JP[k] for k in ["model", "qty"] + both], skipped
 
 
+def compare_qq(a, b, with_qty=False):
+    """見積同士を比べる(a=客先に出した見積 / b=仕入先の見積)。型式と品名だけを比べる。
+    単価・金額・合計・納期・単位は、違って当たり前なので、比べない。数量は、選んだときだけ比べる。
+    「確実」と言い切れる行だけ OK を出す。自信がない行・違う点がある行は、必ず人に見せる(黙って通さない)。"""
+    res = []
+    amap, bmap = {}, {}
+    for r in a.rows: amap.setdefault(r["model"], []).append(r)
+    for r in b.rows: bmap.setdefault(r["model"], []).append(r)
+
+    def sure(r):   # 文字入りPDF・Excelは、型式の読み間違いが起きない。画像は、2種類の読み取りが一致したときだけ確実
+        return True if r.get("src") != "ocr" else bool(r.get("exact"))
+
+    for mp, side in ((amap, "q"), (bmap, "o")):
+        for m, rs in mp.items():
+            if len(rs) > 1:
+                for r in rs:
+                    res.append({"status": "REVIEW", "model": r["model_raw"], "msg": "同じ型式が複数行ある(自動では照合しない)", "qrow": r if side == "q" else None, "orow": r if side == "o" else None})
+    use_name = any(r.get("name") for r in a.rows) and any(r.get("name") for r in b.rows)
+    for m in sorted(set(amap) | set(bmap)):
+        if len(amap.get(m, [])) > 1 or len(bmap.get(m, [])) > 1:
+            continue
+        x = amap.get(m, [None])[0]; y = bmap.get(m, [None])[0]
+        if x and y:
+            ocr = x.get("src") == "ocr" or y.get("src") == "ocr"
+            diffs = []
+            if use_name and x.get("name") and y.get("name") and norm(x["name"]) != norm(y["name"]):
+                diffs.append(f"品名: 客先「{x['name']}」⇔ 仕入先「{y['name']}」")
+            if with_qty and x.get("qty") != y.get("qty"):
+                diffs.append(f"数量: 客先「{x.get('qty')}」⇔ 仕入先「{y.get('qty')}」")
+            if diffs:
+                qty_only = all(d.startswith("数量") for d in diffs)
+                st = "DIFF" if (qty_only and sure(x) and sure(y)) else "REVIEW"
+                res.append({"status": st, "model": x["model_raw"], "msg": "型式は同じで、違う点がある: " + " / ".join(diffs) + ("" if st == "DIFF" else "(確認してください)"), "qrow": x, "orow": y})
+            elif not (sure(x) and sure(y)):
+                res.append({"status": "REVIEW", "model": x["model_raw"], "msg": "型式は一致して見えるが、読み取りが確実でない(他の読み取りと食い違う)", "qrow": x, "orow": y})
+            else:
+                res.append({"status": "OK_IMG" if ocr else "OK", "model": x["model_raw"], "msg": "", "qrow": x, "orow": y})
+        else:
+            one = x or y
+            other = bmap if x else amap
+            near = [k for k in other if lev(m, k) <= 2]
+            where = "客先の見積にだけある" if x else "仕入先の見積にだけある"
+            if near:
+                res.append({"status": "REVIEW", "model": one["model_raw"], "msg": f"{where}型式。近い型式: {', '.join(other[k][0]['model_raw'] for k in near)}(1〜2文字の違い。見間違いか、本当の違いか、確認してください)", "qrow": x, "orow": y})
+            else:
+                st = "DIFF" if sure(one) else "REVIEW"
+                res.append({"status": st, "model": one["model_raw"], "msg": f"{where}型式" + ("" if st == "DIFF" else "(読み取りが確実でないので、断定しない)"), "qrow": x, "orow": y})
+    for d, nm in ((a, "客先見積"), (b, "仕入先見積")):
+        notes = [n for n in d.notes if "合計を読めなかった" not in n]   # 合計は使わないので、読めなくてよい
+        if not d.rows:
+            res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}書から明細行を1行も読めなかった: " + " / ".join(notes or ["原因不明"]), "qrow": None, "orow": None, "doc": "q" if nm == "客先見積" else "o"})
+        elif notes:
+            res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}: " + " / ".join(notes), "qrow": None, "orow": None, "doc": "q" if nm == "客先見積" else "o"})
+    compared = ["型式"] + (["品名"] if use_name else []) + (["数量"] if with_qty else [])
+    return res, compared, []
+
+
 # ------------------------------------------------------------------ 根拠の画像
 def crop_b64(doc, row):
     try:
@@ -808,25 +865,41 @@ def read_many(jobs, workers=4, progress=None):
     return out
 
 
-def run_vendor(vdir, workers=4, progress=None, name=None):
+ROLES_BY_MODE = {"qo": ("見積", "発注"), "qq": ("客先見積", "仕入先見積")}   # qo=見積⇔発注 / qq=見積⇔見積(客先と仕入先)
+SKIPNOTE_QQ = "単価・金額・合計・納期・単位(違って当たり前なので、比べません)"
+
+
+def run_vendor(vdir, workers=4, progress=None, name=None, mode="qo", with_qty=False):
+    roles = ROLES_BY_MODE[mode]
     out = {"vendor": name or os.path.basename(vdir), "pairs": [], "warnings": []}
     jobs = []
-    for role in ("見積", "発注"):
+    for role in roles:
         rd = os.path.join(vdir, role)
         if not os.path.isdir(rd): continue
         for fn in sorted(os.listdir(rd)):
             if fn.lower().endswith(EXTS):
                 jobs.append((os.path.join(rd, fn), role))
-    docs = {"見積": [], "発注": []}
+    docs = {roles[0]: [], roles[1]: []}
     for d in read_many(jobs, workers, progress):
         k = kind_of(d.text)
-        if k and k != d.role:
-            out["warnings"].append(f"{d.role}フォルダの「{d.name}」は、中身が「{k}」と読める。入れる場所を間違えていないか確認してください")
+        if mode == "qo":
+            if k and k != d.role:
+                out["warnings"].append(f"{d.role}フォルダの「{d.name}」は、中身が「{k}」と読める。入れる場所を間違えていないか確認してください")
+        elif k == "発注":
+            out["warnings"].append(f"{d.role}フォルダの「{d.name}」は、中身が「発注書」と読める。見積書を入れる場所です。間違えていないか確認してください")
         docs[d.role].append(d)
     out["seconds"] = sum(d.seconds for r in docs.values() for d in r)
-    for q, o, why in pair_docs(docs["見積"], docs["発注"]):
+    A, B = docs[roles[0]], docs[roles[1]]
+    if mode == "qq" and len(A) == 1 and len(B) == 1:
+        pairs = [(A[0], B[0], "1対1で、そのまま組にした")]   # 見積番号が違うのが普通なので、1枚ずつなら、迷わず組にする
+    else:
+        pairs = pair_docs(A, B)
+    for q, o, why in pairs:
         item = {"q": q, "o": o, "why": why, "results": [], "compared": [], "skipped": []}
-        if q and o: item["results"], item["compared"], item["skipped"] = compare(q, o)
+        if mode == "qq": item["skipnote"] = SKIPNOTE_QQ
+        if q and o:
+            if mode == "qq": item["results"], item["compared"], item["skipped"] = compare_qq(q, o, with_qty)
+            else: item["results"], item["compared"], item["skipped"] = compare(q, o)
         out["pairs"].append(item)
     return out
 

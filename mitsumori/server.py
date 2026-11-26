@@ -16,9 +16,16 @@ PORT = {"n": 0}
 WORK = os.environ.get("MC_WORK") or os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "見積照合_作業フォルダ")
 NSLOT = 4
 ROLES = ("見積", "発注")
+MODES = C.ROLES_BY_MODE   # qo=見積⇔発注 / qq=見積⇔見積(客先と仕入先)
+
+
+def _mode(q):
+    m = (q or {}).get("mode", "qo")
+    if m not in MODES: raise ValueError("使い方の指定が違います")
+    return m
 LOCK = threading.Lock()
 JOB = {"status": "idle", "done": 0, "total": 0, "msg": "", "result": None, "t0": 0, "sec": 0}
-NAMES = {i: f"{'ABCD'[i-1]}社" for i in range(1, NSLOT + 1)}
+NAMES = {m: {i: f"{'ABCD'[i-1]}社" for i in range(1, NSLOT + 1)} for m in MODES}
 
 
 def slot_dir(i, role=None):
@@ -32,15 +39,15 @@ def safe_name(n):
     return n or "file"
 
 
-def state():
+def state(mode="qo"):
     slots = []
     for i in range(1, NSLOT + 1):
-        d = {"id": i, "name": NAMES[i]}
-        for r in ROLES:
+        d = {"id": i, "name": NAMES[mode][i]}
+        for r in MODES[mode]:
             p = slot_dir(i, r)
             d[r] = sorted(os.listdir(p)) if os.path.isdir(p) else []
         slots.append(d)
-    j = {k: JOB[k] for k in ("status", "done", "total", "msg", "sec")}
+    j = {k: JOB[k] for k in ("status", "done", "total", "msg", "sec")}; j["mode"] = JOB.get("mode")
     if JOB["status"] == "running": j["sec"] = round(time.time() - JOB["t0"])
     return {"version": VERSION, "slots": slots, "job": j}
 
@@ -63,7 +70,7 @@ def serialize(vendors):
               "count": {"OK": 0, "OK_IMG": 0, "DIFF": 0, "REVIEW": 0, "NOPAIR": 0}}
         for p in v["pairs"]:
             q, o = p["q"], p["o"]
-            sp = {"q": q.name if q else None, "o": o.name if o else None, "why": p["why"], "compared": p["compared"], "skipped": p["skipped"], "rows": []}
+            sp = {"q": q.name if q else None, "o": o.name if o else None, "why": p["why"], "compared": p["compared"], "skipped": p["skipped"], "skipnote": p.get("skipnote"), "rows": []}
             if not (q and o):
                 sv["count"]["NOPAIR"] += 1
             for r in p["results"]:
@@ -88,18 +95,19 @@ def serialize(vendors):
     return {"vendors": out, "pages": pages}
 
 
-def run_job():
+def run_job(mode="qo", with_qty=False):
     try:
         vendors = []
-        slots = [i for i in range(1, NSLOT + 1) if any(os.path.isdir(slot_dir(i, r)) and os.listdir(slot_dir(i, r)) for r in ROLES)]
-        total = sum(len(os.listdir(slot_dir(i, r))) for i in slots for r in ROLES if os.path.isdir(slot_dir(i, r)))
+        RL = MODES[mode]
+        slots = [i for i in range(1, NSLOT + 1) if any(os.path.isdir(slot_dir(i, r)) and os.listdir(slot_dir(i, r)) for r in RL)]
+        total = sum(len(os.listdir(slot_dir(i, r))) for i in slots for r in RL if os.path.isdir(slot_dir(i, r)))
         JOB.update(total=total, done=0)
         base = {"n": 0}
         for i in slots:
             def prog(done, tot, base=base):
                 JOB["done"] = base["n"] + done
-            n_in = sum(len(os.listdir(slot_dir(i, r))) for r in ROLES if os.path.isdir(slot_dir(i, r)))
-            vendors.append(C.run_vendor(slot_dir(i), workers=C.auto_workers(), progress=prog, name=NAMES[i]))
+            n_in = sum(len(os.listdir(slot_dir(i, r))) for r in RL if os.path.isdir(slot_dir(i, r)))
+            vendors.append(C.run_vendor(slot_dir(i), workers=C.auto_workers(), progress=prog, name=NAMES[mode][i], mode=mode, with_qty=with_qty))
             base["n"] += n_in; JOB["done"] = base["n"]
         JOB["result"] = serialize(vendors)
         JOB["status"] = "done"
@@ -139,8 +147,10 @@ class H(BaseHTTPRequestHandler):
             p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
             if not os.path.exists(p): p = os.path.join(HERE, "index.html")
             return self._send(200, open(p, "rb").read(), "text/html; charset=utf-8")
-        if u.path == "/api/state": return self._send(200, state())
-        if u.path == "/api/result": return self._send(200, {"status": JOB["status"], "result": JOB["result"], "msg": JOB["msg"], "sec": JOB["sec"]})
+        if u.path == "/api/state":
+            try: return self._send(200, state(_mode(dict(urllib.parse.parse_qsl(u.query)))))
+            except ValueError as e: return self._send(400, {"error": str(e)})
+        if u.path == "/api/result": return self._send(200, {"status": JOB["status"], "result": JOB["result"], "msg": JOB["msg"], "sec": JOB["sec"], "mode": JOB.get("mode")})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -150,8 +160,8 @@ class H(BaseHTTPRequestHandler):
         body = self.rfile.read(n) if n else b""
         try:
             if u.path == "/api/upload":
-                i, role = int(q["slot"]), q["role"]
-                assert 1 <= i <= NSLOT and role in ROLES
+                mode = _mode(q); i, role = int(q["slot"]), q["role"]
+                assert 1 <= i <= NSLOT and role in MODES[mode]
                 if JOB["status"] == "running": return self._send(409, {"error": "照合中です。終わってからにしてください"})
                 d = slot_dir(i, role); os.makedirs(d, exist_ok=True)
                 name = safe_name(q.get("name", "file")); p = os.path.join(d, name); k = 1
@@ -161,24 +171,31 @@ class H(BaseHTTPRequestHandler):
                 if JOB["status"] in ("done", "error"): JOB.update(status="idle", result=None)   # 書類が変わったら、前の結果は消す
                 return self._send(200, {"ok": True})
             if u.path == "/api/remove":
-                i, role = int(q["slot"]), q["role"]; p = os.path.join(slot_dir(i, role), safe_name(q["name"]))
+                mode = _mode(q); i, role = int(q["slot"]), q["role"]
+                assert 1 <= i <= NSLOT and role in MODES[mode]
+                p = os.path.join(slot_dir(i, role), safe_name(q["name"]))
                 if os.path.exists(p): os.remove(p)
                 JOB.update(status="idle", result=None) if JOB["status"] != "running" else None
                 return self._send(200, {"ok": True})
             if u.path == "/api/name":
-                i = int(q["slot"]); NAMES[i] = (q.get("name") or NAMES[i])[:20]; return self._send(200, {"ok": True})
+                mode = _mode(q); i = int(q["slot"]); assert 1 <= i <= NSLOT
+                NAMES[mode][i] = (q.get("name") or NAMES[mode][i])[:20]; return self._send(200, {"ok": True})
             if u.path == "/api/run":
                 if JOB["status"] == "running": return self._send(409, {"error": "照合中です"})
-                JOB.update(status="running", done=0, total=0, msg="", result=None, t0=time.time(), sec=0)
-                threading.Thread(target=run_job, daemon=True).start()
+                mode = _mode(q); wq = q.get("qty") == "1"
+                JOB.update(status="running", done=0, total=0, msg="", result=None, t0=time.time(), sec=0, mode=mode)
+                threading.Thread(target=run_job, args=(mode, wq), daemon=True).start()
                 return self._send(200, {"ok": True})
-            if u.path == "/api/reset":   # リセット: 書類も結果も、全部消す
+            if u.path == "/api/reset":   # リセット: その使い方の、書類も結果も、消す(もう一方の使い方の書類は、消さない)
                 if JOB["status"] == "running": return self._send(409, {"error": "照合中です"})
-                if "slot" in q: shutil.rmtree(slot_dir(int(q["slot"])), ignore_errors=True)
-                else: shutil.rmtree(WORK, ignore_errors=True)
+                mode = _mode(q)
+                slots = [int(q["slot"])] if "slot" in q else list(range(1, NSLOT + 1))
+                for i in slots:
+                    assert 1 <= i <= NSLOT
+                    for r in MODES[mode]: shutil.rmtree(slot_dir(i, r), ignore_errors=True)
                 JOB.update(status="idle", done=0, total=0, msg="", result=None, sec=0)
                 if "slot" not in q:
-                    for i in NAMES: NAMES[i] = f"{'ABCD'[i-1]}社"
+                    for i in NAMES[mode]: NAMES[mode][i] = f"{'ABCD'[i-1]}社"
                 return self._send(200, {"ok": True})
         except Exception as e:
             return self._send(400, {"error": f"{type(e).__name__}: {e}"})
