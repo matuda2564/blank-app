@@ -925,6 +925,27 @@ def fields_of(d):
     return f
 
 
+def _hay(d):
+    """書類の画像の文字(2種類の読み取り)を、1本につないだもの(空白・カンマなし。数字や型番が、どこに書いてあっても、探せる)"""
+    t = "".join(L["text"] for L in list(d.lines) + list(d.lines2))
+    return norm(t).replace(",", "")
+
+
+def _found_num(d, v):
+    if v is None: return False
+    return re.search(r"(?<!\d)" + re.escape(str(int(v)) if float(v) == int(v) else str(v)) + r"(?!\d)", _hay(d)) is not None
+
+
+def quote_check(q, o):
+    """見積番号の突き合わせ。戻り: (ok/ng/na, 説明)。見積番号が、発注書のどこかに書いてあれば、画像で欄として読めなくても、一致とみなす"""
+    qn, on = quote_no(q.text), quote_no(o.text)
+    if qn and on:
+        return ("ok", f"見積番号 {qn} が一致") if qn == on else ("ng", f"見積番号が違う(見積 {qn} / 発注書 {on})")
+    if qn and qn in norm(o.text): return "ok", f"見積番号 {qn} が、発注書に書いてある"
+    if on and on in norm(q.text): return "ok", f"見積番号 {on} が、見積に書いてある"
+    return "na", "見積番号を、読み取れなかった"
+
+
 def compare(q, o):
     """1組を比べる。戻り: (結果リスト, 比べた項目, 比べなかった項目)"""
     res = []
@@ -956,6 +977,17 @@ def compare(q, o):
             continue
         a = qmap.get(m, [None])[0]; b = omap.get(m, [None])[0]
         if a and b:
+            ck = [("見積番号",) + quote_check(q, o), ("型式", "ok", "一致")]
+            for k_, lab_ in (("qty", "数量"), ("price", "単価"), ("amount", "金額")):
+                va_, vb_ = a.get(k_), b.get(k_)
+                if va_ is not None and vb_ is not None:
+                    ck.append((lab_, "ok" if va_ == vb_ else "ng", "一致" if va_ == vb_ else f"見積 {va_:,} / 発注 {vb_:,}"))
+                elif va_ is None and vb_ is None: ck.append((lab_, "na", "どちらの書類にも無い/読めない"))
+                else:   # 片方が読めない: 読めた側の値が、画像の文字の中に書いてあるかを、探す(画像の読み取りで、列がずれても、見つけられる)
+                    img, val = (a, vb_) if va_ is None else (b, va_)
+                    dd = q if va_ is None else o
+                    ck.append((lab_, "ok" if dd.src == "ocr" and _found_num(dd, val) else "na", "画像の文字の中に、同じ数字があった" if dd.src == "ocr" and _found_num(dd, val) else "読み取れず"))
+            a["_ck"] = ck
             diffs, softdiffs = [], []
             for k in ("qty", "price", "amount", "name", "unit", "due"):
                 if k != "qty" and k not in both: continue
@@ -976,8 +1008,7 @@ def compare(q, o):
             elif diffs:
                 res.append({"status": "REVIEW", "model": a["model_raw"], "msg": "違いに見えるが、読み取りが確実でない: " + " / ".join(diffs), "qrow": a, "orow": b})
             elif not probs and not sure and ocr and (a.get("unverified") or b.get("unverified")) and (a["exact"] or a.get("unverified")) and (b["exact"] or b.get("unverified")) and a.get("src") != b.get("src") and any(k in ("qty", "amount") for k in ("qty", "amount") if a.get(k) is not None and a.get(k) == b.get(k)):
-                why = list(dict.fromkeys(a.get("unv_why", []) + b.get("unv_why", [])))
-                res.append({"status": "OK_IMG", "model": a["model_raw"], "msg": "型式・数量・金額は、相手の書類と一致しました。ただし、画像の読み取りが確実でないので、画像を見て確認してください(" + " / ".join(why) + ")", "qrow": a, "orow": b})
+                res.append({"status": "OK_IMG", "model": a["model_raw"], "msg": "型式・数量・金額は、相手の書類と一致しました。画像の読み取りは確実でないので、目で確認してください", "qrow": a, "orow": b})
             elif probs or not sure:
                 res.append({"status": "REVIEW", "model": a["model_raw"], "msg": "読み取りに自信がない: " + " / ".join(dict.fromkeys(probs + a.get("unv_why", []) + b.get("unv_why", []) or ["読み取りが確実でない"])), "qrow": a, "orow": b})
             else:
@@ -996,6 +1027,8 @@ def compare(q, o):
             res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}書から明細行を1行も読めなかった: " + " / ".join(d.notes or ["原因不明"]), "qrow": None, "orow": None, "doc": "q" if nm == "見積" else "o"})
         elif [n for n in d.notes if "傾いていた" not in n]:   # 向きを直したことは、お知らせであって、要確認ではない(読み取った中身の注意に出す)
             res.append({"status": "REVIEW", "model": "(書類全体)", "msg": f"{nm}書: " + " / ".join(n for n in d.notes if "傾いていた" not in n), "qrow": None, "orow": None, "doc": "q" if nm == "見積" else "o"})
+    for r_ in res:
+        if r_.get("qrow") and r_.get("orow") and r_["qrow"].get("_ck"): r_["checks"] = r_["qrow"]["_ck"]
     return res, [JP[k] for k in ["model", "qty"] + both], skipped
 
 

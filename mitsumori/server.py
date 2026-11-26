@@ -127,11 +127,13 @@ def serialize(vendors):
         for p in v["pairs"]:
             q, o = p["q"], p["o"]
             sp = {"q": q.name if q else None, "o": o.name if o else None, "why": p["why"], "compared": p["compared"], "skipped": p["skipped"], "skipnote": p.get("skipnote"), "qread": C.doc_info(q, p.get("mode", "qo")), "oread": C.doc_info(o, p.get("mode", "qo")), "rows": []}
+            if q and o and p.get("mode", "qo") == "qo":
+                st_, dt_ = C.quote_check(q, o); sp["refcheck"] = {"st": st_, "detail": dt_}
             if not (q and o):
                 sv["count"]["NOPAIR"] += 1
             for r in p["results"]:
                 sv["count"][r["status"]] += 1
-                row = {"status": r["status"], "model": r["model"], "msg": r["msg"]}
+                row = {"status": r["status"], "model": r["model"], "msg": r["msg"], "checks": [list(c) for c in r["checks"]] if r.get("checks") else None}
                 if r["status"] != "OK":
                     row["qimg"] = C.crop_b64(q, r["qrow"]) if q and r["qrow"] else None
                     row["oimg"] = C.crop_b64(o, r["orow"]) if o and r["orow"] else None
