@@ -705,7 +705,7 @@ def kind_of(text):
 
 
 def quote_no(text):
-    m = re.search(r"見積(?:書)?(?:番号|No\.?|NO\.?)[:：]?\s*([A-Za-z0-9\-]+)", unicodedata.normalize("NFKC", text))
+    m = re.search(r"見積(?:書|り)?\s*(?:番号|No\.?|NO\.?)+[:：]?\s*([A-Za-z0-9\-]+)", unicodedata.normalize("NFKC", text))
     return norm(m.group(1)) if m else None
 
 
@@ -734,32 +734,67 @@ def jaccard(a, b):
     return (len(ex) + 0.7 * near) / (len(a) + len(b) - len(ex) - near)
 
 
+def pair_score(q, o):
+    """見積 q と発注書 o の、組になりそうな度合い。見積番号が一致=2.0。それ以外は、型式の重なり(+発注書のどこかに見積番号が書いてあれば、決め手の加点)"""
+    qn, on = quote_no(q.text), quote_no(o.text)
+    if on and qn and on == qn: return 2.0, "見積番号が一致"
+    sc = jaccard([r["model"] for r in q.rows], [r["model"] for r in o.rows])
+    why = f"型式の重なり {sc:.0%}"
+    if qn and sc > 0 and qn in norm(o.text):
+        sc += 0.5; why += "+発注書に見積番号が書いてある"
+    return sc, why
+
+
+def _nums(docs):
+    return "、".join(sorted({quote_no(d.text) for d in docs if quote_no(d.text)})) or "(読み取れなかった)"
+
+
 def pair_docs(quotes, orders):
+    """見積と発注書の組を決める。まとめて何枚入れても、強い組(見積番号が一致・型式がよく重なる)から先に決め、
+    同点で迷うものは、組にせず、理由(見積番号・型式の重なり)を数字で出して、人に回す"""
     pairs, used = [], set()
-    for o in orders:
-        on = quote_no(o.text)
-        cand = []
-        for i, q in enumerate(quotes):
-            qn = quote_no(q.text)
-            if on and qn and on == qn and i not in used:
-                cand.append((2.0, i, "見積番号が一致"))
-            else:
-                sc = jaccard([r["model"] for r in q.rows], [r["model"] for r in o.rows])
-                why = f"型式の重なり {sc:.0%}"
-                if qn and sc > 0 and qn in norm(o.text):   # 発注書のどこかに、見積番号が書いてあれば、同点のときの決め手にする(画像で読み違えて、見積番号の欄としては拾えなくても)
-                    sc += 0.5; why += "+発注書に見積番号が書いてある"
-                cand.append((sc, i, why))
-        cand.sort(reverse=True)
+    top = {oi: max([pair_score(q, o)[0] for q in quotes] or [0]) for oi, o in enumerate(orders)}
+    for oi in sorted(range(len(orders)), key=lambda k: -top[k]):
+        o = orders[oi]
+        cand = sorted(((*pair_score(q, o), i) for i, q in enumerate(quotes) if i not in used), key=lambda c: -c[0])   # (点, 理由, 見積の番号)
         if cand and cand[0][0] >= 0.5 and (len(cand) == 1 or cand[0][0] - cand[1][0] >= 0.2 or cand[0][0] >= 2.0):
-            used.add(cand[0][1]); pairs.append((quotes[cand[0][1]], o, cand[0][2]))
+            used.add(cand[0][2]); pairs.append((quotes[cand[0][2]], o, cand[0][1]))
         else:
-            best = f"{cand[0][0]:.0%}" if cand and cand[0][0] < 2.0 else "0%"
-            pairs.append((None, o, f"相手が決まらない。見積番号が一致せず、型式の重なりが最大でも {best}(組にする基準は、50%以上で、2番目より20ポイント以上高いこと)"))
+            on = quote_no(o.text)
+            parts = ["相手が決まらない"]
+            if on: parts.append(f"発注書に書かれた見積番号は {on}、入っている見積の番号は {_nums(quotes)}(一致なし)")
+            if cand:
+                t = f"型式の重なりは、最大でも {min(cand[0][0], 1.0):.0%}"
+                if len(cand) > 1 and cand[0][0] >= 0.5: t += f"(2番目も {min(cand[1][0], 1.0):.0%}で、どちらか決められない)"
+                parts.append(t)
+            parts.append("対応する見積が、入っていない(または、入れる社の枠が違う)かもしれません")
+            msg = "。".join(parts)
+            pairs.append((None, o, msg))
     for i, q in enumerate(quotes):
         if i not in used:
-            pairs.append((q, None, "対応する発注書がない"))
+            refs = sorted({quote_no(o.text) for o in orders if quote_no(o.text)})
+            pairs.append((q, None, "対応する発注書がない" + (f"(入っている発注書が書いている見積番号: {'、'.join(refs)}。この見積の番号: {quote_no(q.text) or '読み取れなかった'})" if refs else "")))
     return pairs
 
+
+def cross_hints(vendors):
+    """組にならなかった書類について、『別の社の枠』に入っている相手を探して、理由に書き足す(入れる社の枠を間違えたとき、気づけるように)"""
+    for vi, v in enumerate(vendors):
+        for p in v["pairs"]:
+            if bool(p["q"]) == bool(p["o"]):
+                continue
+            d = p["q"] or p["o"]
+            best = (0.0, None, None)
+            for vj, w in enumerate(vendors):
+                if vj == vi: continue
+                for p2 in w["pairs"]:
+                    if p2["q"] and p2["o"]: continue
+                    other = p2["o"] if p["q"] else p2["q"]
+                    if not other: continue
+                    sc, _ = pair_score(d, other) if p["q"] else pair_score(other, d)
+                    if sc > best[0]: best = (sc, w["vendor"], other)
+            if best[0] >= 0.5 and best[2] is not None:
+                p["why"] += f"。★「{best[1]}」の枠にある「{best[2].name}」と、組になりそうです(入れる社の枠を、間違えていませんか?)"
 
 
 def _hdr_cols(toks):
