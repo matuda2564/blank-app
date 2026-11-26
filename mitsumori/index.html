@@ -76,13 +76,14 @@ let ST=null, timer=null, PAGES={}, ITEMS=[], CUR=-1;
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const TK=new URLSearchParams(location.search).get('t')||'';
 async function api(path,opt){opt=Object.assign({},opt);opt.headers=Object.assign({'X-MC-Token':TK},opt.headers||{});const r=await fetch(path,opt);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j}
-async function refresh(){ST=await api('/api/state');render()}
+let SEQ=0;
+async function refresh(){const my=++SEQ;let st;try{st=await api('/api/state')}catch(e){return}if(my<SEQ)return;ST=st;render()}   // 遅れて届いた古い返事は、捨てる
 function render(){
  $('ver').textContent=ST.version;
  const j=ST.job,running=j.status==='running';
  let h='';
  for(const s of ST.slots){
-  h+=`<div class="slot"><input class="nm" value="${esc(s.name)}" onchange="rename(${s.id},this.value)" ${running?'disabled':''}>`;
+  h+=`<div class="slot"><input class="nm" value="${esc(s.name)}" onchange="rename(${s.id},this.value)" ${running?'disabled':''}> <button class="sm" onclick="resetSlot(${s.id})" ${running?'disabled':''}>この社をリセット</button>`;
   for(const r of ROLES){
    h+=`<div class="dz" data-slot="${s.id}" data-role="${r}"><b>${r}書 (${s[r].length}枚)</b><span class="hint">ここにドラッグ、またはクリックして選ぶ</span>
    <div class="files">${s[r].map(f=>`<div><span>${esc(f)}</span><button title="外す" onclick="event.stopPropagation();rm(${s.id},'${r}',decodeURIComponent('${encodeURIComponent(f)}'))">✕</button></div>`).join('')}</div></div>`;
@@ -91,9 +92,9 @@ function render(){
  }
  $('slots').innerHTML=h;
  document.querySelectorAll('.dz').forEach(z=>{
-  z.onclick=()=>{if(running)return;const i=document.createElement('input');i.type='file';i.multiple=true;i.style.display='none';i.accept='.pdf,.xlsx,.xlsm,.png,.jpg,.jpeg,.tif,.tiff,.bmp';document.body.appendChild(i);i.onchange=()=>{up(z.dataset.slot,z.dataset.role,[...i.files]).then(()=>i.remove())};i.click()};
+  z.onclick=()=>{if(ST.job.status==='running')return;const i=document.createElement('input');i.type='file';i.multiple=true;i.style.display='none';i.accept='.pdf,.xlsx,.xlsm,.png,.jpg,.jpeg,.tif,.tiff,.bmp';document.body.appendChild(i);i.onchange=()=>{up(z.dataset.slot,z.dataset.role,[...i.files]).then(()=>i.remove())};i.click()};
   z.ondragover=e=>{e.preventDefault();z.classList.add('over')};z.ondragleave=()=>z.classList.remove('over');
-  z.ondrop=e=>{e.preventDefault();z.classList.remove('over');if(!running)up(z.dataset.slot,z.dataset.role,e.dataTransfer.files)};
+  z.ondrop=e=>{e.preventDefault();z.classList.remove('over');if(ST.job.status!=='running')up(z.dataset.slot,z.dataset.role,e.dataTransfer.files)};
  });
  const has=ST.slots.some(s=>s['見積'].length&&s['発注'].length);
  $('go').disabled=running||!has; $('reset').disabled=running;
@@ -108,10 +109,13 @@ async function up(slot,role,files){
  $('out').innerHTML='';$('save').style.display='none';await refresh();
 }
 async function rm(slot,role,name){await api(`/api/remove?slot=${slot}&role=${encodeURIComponent(role)}&name=${encodeURIComponent(name)}`,{method:'POST'});$('out').innerHTML='';$('save').style.display='none';refresh()}
+async function resetSlot(slot){const n=(ST.slots.find(x=>x.id===slot)||{}).name||'この社';if(!confirm(n+'の書類と結果を消します。よろしいですか?'))return;try{await api(`/api/reset?slot=${slot}`,{method:'POST'})}catch(e){alert(e.message)}$('out').innerHTML='';$('save').style.display='none';refresh()}
 async function rename(slot,name){await api(`/api/name?slot=${slot}&name=${encodeURIComponent(name)}`,{method:'POST'})}
 $('go').onclick=async()=>{try{await api('/api/run',{method:'POST'});$('out').innerHTML='';$('save').style.display='none';poll()}catch(e){alert(e.message)}};
 $('reset').onclick=async()=>{if(!confirm('書類も結果も、全部消します。よろしいですか?'))return;await api('/api/reset',{method:'POST'});$('out').innerHTML='';$('save').style.display='none';refresh()};
-function poll(){clearInterval(timer);timer=setInterval(async()=>{await refresh();if(ST.job.status!=='running'){clearInterval(timer);showResult()}},800);refresh()}
+let POLLING=false;
+async function poll(){if(POLLING)return;POLLING=true;try{for(;;){await refresh();if(ST.job.status!=='running')break;await new Promise(r=>setTimeout(r,800))}}finally{POLLING=false}await showResult()}
+setInterval(()=>{if(!POLLING)refresh()},4000)   // 画面と裏の状態が食い違ったまま固まらないよう、ときどき合わせる
 async function showResult(){
  const r=await api('/api/result');
  if(r.status==='error'){$('out').innerHTML=`<div class="err">照合に失敗しました: ${esc(r.msg)}</div>`;return}
@@ -172,5 +176,5 @@ document.addEventListener('keydown',e=>{if($('vw').hidden)return;if(e.key==='Arr
 function todo(){const n=ITEMS.filter(x=>!x.done).length,e=$('todo');if(!e)return;
  e.innerHTML=ITEMS.length?`確認が必要な行: ${ITEMS.length}行のうち、未確認 ${n}行 <button class="sm pri" onclick="const j=nextUndone(-1);if(j>=0)openV(j)" ${n?'':'disabled'}>確認を始める(書類全体に赤枠・順番に)</button>`:'確認が必要な行はありません'}
 $('save').onclick=()=>{const css=document.querySelector('style').textContent;const html=`<!doctype html><meta charset="utf-8"><title>照合結果</title><style>${css}</style><body><main>${$('out').innerHTML}</main>`;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([html],{type:'text/html'}));a.download='照合結果_'+new Date().toISOString().slice(0,16).replace(/[:T]/g,'')+'.html';a.click()};
-refresh().then(()=>{if(ST.job.status==='running')poll()});
+refresh().then(()=>{if(ST&&ST.job.status==='running')poll()});
 </script></body></html>
