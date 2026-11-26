@@ -230,19 +230,22 @@ def smoke(outpath):
 
 
 def main():
-    import server
+    import server, mc_core
     srv, port = server.start(0)
     url = server.url(port)
+    reason = ""
     try:
         import webview
         webview.create_window("見積・発注 照合", url, width=1280, height=860)
         webview.start()
-    except Exception:
+    except Exception as e:
+        reason = f"{type(e).__name__}: {e}"
+        mc_core.log("専用の窓を開けなかった(ブラウザで開く): " + traceback.format_exc())   # 黙って握りつぶさない
         webbrowser.open(url)
         try:
             import tkinter
-            r = tkinter.Tk(); r.title("見積・発注 照合"); r.geometry("380x120")
-            tkinter.Label(r, text="ブラウザで画面を開きました。\nこの窓を閉じると、終了します(書類も消えます)。", pady=24).pack()
+            r = tkinter.Tk(); r.title("見積・発注 照合"); r.geometry("520x210")
+            tkinter.Label(r, text="専用の窓を開けなかったため、ブラウザで画面を開きました。\n使い方は、同じです。この窓を閉じると、終了します(書類も消えます)。\n\n理由(開発者に伝えてください):\n" + reason[:160], pady=18, wraplength=480, justify="left").pack()
             r.mainloop()
         except Exception:
             while True: time.sleep(3600)
@@ -250,9 +253,37 @@ def main():
     shutil.rmtree(server.WORK, ignore_errors=True)   # 終了時に、作業中の書類を全部消す
 
 
+def windowcheck(outpath):
+    """専用の窓が、このパソコン(ビルド機)で、本当に、開いて、画面を表示できるか(--windowcheck <出力ファイル>)"""
+    import threading
+    res = {"ok": False, "title": None, "err": ""}
+    try:
+        import server
+        srv, port = server.start(0)
+        import webview
+        w = webview.create_window("check", server.url(port), width=900, height=600)
+        def later():
+            try:
+                time.sleep(7)
+                res["title"] = w.evaluate_js("document.title")
+                res["ok"] = bool(res["title"])
+            except Exception:
+                res["err"] += traceback.format_exc()
+            finally:
+                try: w.destroy()
+                except Exception: pass
+        webview.start(later)
+    except Exception:
+        res["err"] += traceback.format_exc()
+    open(outpath, "w", encoding="utf-8").write(("WINDOW OK\n" if res["ok"] else "WINDOW NG\n") + f"title={res['title']}\n{res['err']}\n")
+    return 0 if res["ok"] else 1
+
+
 if __name__ == "__main__":
     if len(sys.argv) >= 3 and sys.argv[1] == "--selftest":
         sys.exit(selftest(sys.argv[2]))
     if len(sys.argv) >= 3 and sys.argv[1] == "--smoke":
         sys.exit(smoke(sys.argv[2]))
+    if len(sys.argv) >= 3 and sys.argv[1] == "--windowcheck":
+        sys.exit(windowcheck(sys.argv[2]))
     main()

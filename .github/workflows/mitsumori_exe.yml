@@ -39,10 +39,16 @@ jobs:
           python mitsumori/launcher.py --smoke smoke_src.txt
           Get-Content smoke_src.txt
           if (-not (Select-String -Path smoke_src.txt -Pattern "SMOKE OK" -Quiet)) { exit 1 }
+      - name: 専用の窓が開くか(ソース・参考)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          python mitsumori/launcher.py --windowcheck window_src.txt
+          Get-Content window_src.txt
       - name: exe を作る
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --onedir --windowed --name MitsumoriCheck --collect-all rapidocr_onnxruntime --collect-all webview `
+          pyinstaller --noconfirm --onedir --windowed --name MitsumoriCheck --collect-all rapidocr_onnxruntime --collect-all webview --collect-all pythonnet --collect-all clr_loader --hidden-import clr `
             --add-data "mitsumori/index.html;." --add-data "C:\Program Files\Tesseract-OCR;tesseract" --paths mitsumori mitsumori/launcher.py
       - name: 作った exe の自己点検
         shell: pwsh
@@ -60,6 +66,14 @@ jobs:
           $p = Start-Process -FilePath "$d\MitsumoriCheck.exe" -ArgumentList "--smoke","$PWD\smoke_exe.txt" -PassThru -Wait
           Get-Content smoke_exe.txt
           if (-not (Select-String -Path smoke_exe.txt -Pattern "SMOKE OK" -Quiet)) { exit 1 }
+      - name: 専用の窓が開くか(作った exe・日本語の名前の場所・参考)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $d = "C:\テスト用\見積照合 フォルダ"
+          $env:MC_WORK = "C:\テスト用\作業フォルダ"
+          $p = Start-Process -FilePath "$d\MitsumoriCheck.exe" -ArgumentList "--windowcheck","$PWD\window_exe.txt" -PassThru -Wait
+          Get-Content window_exe.txt
       - name: 配る形にまとめる
         shell: pwsh
         run: |
