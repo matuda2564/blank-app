@@ -1,0 +1,61 @@
+name: nyukin_exe
+# 入金確認ツールの Windows 版を組み立てる(Windows機が要るので GitHub のランナーを使う)
+on:
+  push:
+    branches: [main]
+    paths: ['nyukin/**', '.github/workflows/nyukin_exe.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install pyinstaller -r nyukin/requirements.txt
+      - name: ソースのまま自己点検
+        shell: pwsh
+        run: |
+          python nyukin/launcher.py --selftest selftest_src.txt
+          Get-Content selftest_src.txt
+          if (-not (Select-String -Path selftest_src.txt -Pattern "SELFTEST OK" -Quiet)) { exit 1 }
+      - name: 日本語の名前の場所で、サーバーごと通しで試す(ソース)
+        shell: pwsh
+        run: |
+          $t = "C:\テスト用\一時"; New-Item -ItemType Directory -Force -Path $t | Out-Null
+          $env:TEMP = $t; $env:TMP = $t
+          python nyukin/launcher.py --smoke smoke_src.txt
+          Get-Content smoke_src.txt
+          if (-not (Select-String -Path smoke_src.txt -Pattern "SMOKE OK" -Quiet)) { exit 1 }
+      - name: exe を作る
+        shell: pwsh
+        run: |
+          "${{ github.run_number }}" | Out-File -Encoding ascii -NoNewline nyukin/BUILD.txt
+          pyinstaller --noconfirm --onedir --windowed --name NyukinCheck --collect-all webview --collect-all pythonnet --collect-all clr_loader --hidden-import clr --hidden-import nk_core `
+            --add-data "nyukin/index.html;." --add-data "nyukin/BUILD.txt;." --paths nyukin nyukin/launcher.py
+      - name: 作った exe の自己点検
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\NyukinCheck\NyukinCheck.exe" -ArgumentList "--selftest","$PWD\selftest_exe.txt" -PassThru -Wait
+          Get-Content selftest_exe.txt
+          if (-not (Select-String -Path selftest_exe.txt -Pattern "SELFTEST OK" -Quiet)) { exit 1 }
+      - name: 作った exe で、サーバーごと通しで試す
+        shell: pwsh
+        run: |
+          $t = "C:\テスト用\一時2"; New-Item -ItemType Directory -Force -Path $t | Out-Null
+          $env:TEMP = $t; $env:TMP = $t
+          $p = Start-Process -FilePath "dist\NyukinCheck\NyukinCheck.exe" -ArgumentList "--smoke","$PWD\smoke_exe.txt" -PassThru -Wait
+          Get-Content smoke_exe.txt
+          if (-not (Select-String -Path smoke_exe.txt -Pattern "SMOKE OK" -Quiet)) { exit 1 }
+      - name: zip にまとめる
+        shell: pwsh
+        run: Compress-Archive -Path dist\NyukinCheck\* -DestinationPath NyukinCheck_win.zip
+      - name: ダウンロードできる場所に置く(見積照合の「最新版」のリンクを、奪わないよう、最新版の印は付けない)
+        shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          gh release create "nyukin-${{ github.run_number }}" NyukinCheck_win.zip --latest=false --title "入金確認 build ${{ github.run_number }}" --notes "Windows版(zipを解凍して NyukinCheck.exe を起動)"
+      - uses: actions/upload-artifact@v4
+        with: { name: NyukinCheck_win, path: NyukinCheck_win.zip }
