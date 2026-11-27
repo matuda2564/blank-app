@@ -61,7 +61,7 @@ button.sm.pri{background:var(--pri);color:#fff}
 .tabs button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px 8px 0 0;padding:9px 16px;font:inherit;font-size:14px;cursor:pointer}
 .tabs button.on{background:var(--pri);color:#fff;border-color:var(--pri);font-weight:700}
 .bn{margin:8px 20px 0;padding:10px 14px;border-radius:8px;font-size:14px;line-height:1.6}.bn.ng{background:var(--ngbg);color:#7a1f1f;border:1px solid var(--ng)}.bn.rv{background:var(--rvbg);color:#5c4300;border:1px solid var(--rv)}
-.rd{border-collapse:collapse;font-size:12px;margin:4px 0}.rd td,.rd th{border:1px solid var(--line);padding:2px 8px;text-align:left}.rdp{margin:6px 0;font-size:13px}.rdp summary{cursor:pointer;color:var(--pri)}
+.cpc{cursor:copy}.cpc:hover{background:#e8f1ff}.rd{border-collapse:collapse;font-size:12px;margin:4px 0}.rd td,.rd th{border:1px solid var(--line);padding:2px 8px;text-align:left}.rdp{margin:6px 0;font-size:13px}.rdp summary{cursor:pointer;color:var(--pri)}
 .opt{margin:8px 0;font-size:14px}.opt small{color:var(--sub)}
 @media print{header,.slots,.bar,.note,.tabs,.opt{display:none}}
 </style></head><body>
@@ -158,6 +158,7 @@ async function showResult(){
  if(r.status!=='done')return;
  const R=r.result.vendors;PAGES=r.result.pages||{};ITEMS=[];
  const tot={OK:0,OK_IMG:0,DIFF:0,REVIEW:0,NOORDER:0,NOPAIR:0};R.forEach(v=>{for(const k in tot)tot[k]+=(v.count[k]||0)});
+ window.CPROWS=[];
  let h=`<div class="chips" id="sum">${chips(tot)}</div><div id="todo" style="margin:4px 0;color:var(--sub)"></div>`+fileSummary(R);
  for(const v of R){
   h+=`<div class="vendor"><h2>${esc(v.vendor)}</h2><div class="chips">${chips(v.count)}</div>`;
@@ -172,14 +173,16 @@ async function showResult(){
    const order={DIFF:0,REVIEW:1,NOORDER:2,OK_IMG:3,OK:4};
    const rows=p.rows.slice().sort((a,b)=>order[a.status]-order[b.status]);
    const okr=rows.filter(r=>r.status==='OK');
-   rows.filter(r=>r.status!=='OK').forEach(r=>{ITEMS.push({row:r,vendor:v.vendor,pair:`${ROLES[0]}「${p.q}」⇔${ROLES[1]}「${p.o}」`,done:false});h+=rowHtml(r,ITEMS.length-1)});
-   if(okr.length)h+=`<details><summary>✅ 確実に一致した行 (${okr.length}行)</summary>${okr.map(r=>`<div class="row OK">${esc(r.model)}</div>`).join('')}</details>`;
+   rows.forEach(r=>{r._vendor=v.vendor;r._odoc=p.o||p.q||'';r._pair=p._id;r._ci=window.CPROWS.length;window.CPROWS.push(r)});
+   rows.filter(r=>r.status!=='OK').forEach(r=>{r._item=ITEMS.length;ITEMS.push({row:r,vendor:v.vendor,pair:`${ROLES[0]}「${p.q}」⇔${ROLES[1]}「${p.o}」`,done:false});h+=rowHtml(r,ITEMS.length-1)});
+   if(okr.length)h+=`<details><summary>✅ 確実に一致した行 (${okr.length}行)</summary><div style="margin:4px 0"><button class="sm pri" onclick="cpMany('OK',false,'${p._id}')">この書類の一致した行を、全部コピー</button> <small>(型式・品名・個数。別の端末の入力画面へ貼れます。文字を押すと、その文字だけコピー)</small></div><table class="rd cpt"><tr><th>型式</th><th>品名</th><th>個数</th><th></th></tr>${okr.map(r=>cpTr(r)).join('')}</table></details>`;
    h+=`</div>`;
   }
   h+=`</div>`;
  }
  $('out').innerHTML=h;$('save').style.display='';todo();if($('out').querySelector('.fbar'))fsFilter('ALL');
 }
+function cpTr(r){const c=r.cp||{};const cell=(t)=>`<td class="cpc" data-t="${esc(String(t==null?'':t))}" onclick="cpCell(this)" title="押すとコピー">${esc(String(t==null?'':t))}</td>`;return `<tr>${cell(c.model)}${cell(c.name)}${cell(c.qty)}<td><button class="sm" onclick="cpRow(${r._ci})">1行コピー</button></td></tr>`}
 function readPanel(p){
  const one=(lab,d)=>d?`<div><b>${esc(lab)}「${esc(d.name)}」</b> <small>(${esc(d.kind||'種類不明')}・${d.mode==='qq'?d.rows.length+'個の型番を発見':d.rows.length+'行を読み取り'})</small>${d.region?`<div class="meta">読んだ範囲: ${esc(d.region)}</div>`:''}${d.mode==='qq'?(d.rows.length?`<table class="rd"><tr><th>見つけた型番</th><th>その行の文字</th><th>確実?</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.m)}</td><td>${esc(r.n||'')}</td><td>${r.sure?'○':(r.noise?'ゴミの疑い(無視)':'要確認')}</td></tr>`).join('')}</table>`:`<div class="warn">型番らしい文字列を、1つも見つけられませんでした(読み取った行: ${d.nlines}行)</div>`):(d.rows.length?`<table class="rd"><tr><th>型式(読んだまま)</th><th>品名</th><th>数量</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.m)}</td><td>${esc(r.n||'')}</td><td>${esc(r.q==null?'':r.q)}</td></tr>`).join('')}</table>`:'<div class="warn">明細の行を、1行も読めませんでした</div>')}${d.notes.length?`<div class="meta">注意: ${esc(d.notes.join(' / '))}</div>`:''}</div>`:'';
  return `<details class="rdp"><summary>読み取った中身を見る(ツールが、書類から、何を読んだか)</summary><div class="two">${one(ROLES[0],p.qread)}${one(ROLES[1],p.oread)}</div></details>`}
@@ -223,7 +226,7 @@ function fileSummary(R){
  const cnt={DIFF:0,REV:0,NP:0,OK:0};L.forEach(f=>cnt[f.v]++);
  window.FS_TEXT=['結果\tファイル\t種類\t社\t相手のファイル\t理由'].concat(L.map(f=>[VL[f.v].replace(/^\S+\s*/,''),f.name,f.role,f.vendor,[...f.partners].join(' / '),f.tags.join(' / ')].join('\t'))).join('\n');
  const btn=(k,label,cls)=>`<button class="fb ${cls}" data-f="${k}" onclick="fsFilter('${k}')">${label} <b>${k==='ALL'?L.length:cnt[k]}</b></button>`;
- return `<div class="fsbox"><div class="fshd"><b>📁 ファイル別の結果</b> <small>(ボタンで、「どれが合っていて・合っていなくて・要確認か」を、切り替えて見られます。下の詳細も、同じように絞り込みます)</small> <button class="sm" onclick="copyFS()">この一覧をコピー(Excelに貼れます)</button></div>
+ return `<div class="fsbox"><div class="fshd"><b>📁 ファイル別の結果</b> <small>(ボタンで、「どれが合っていて・合っていなくて・要確認か」を、切り替えて見られます。下の詳細も、同じように絞り込みます)</small> <button class="sm" onclick="copyFS()">この一覧をコピー(Excelに貼れます)</button> <button class="sm pri" onclick="cpMany('OK',false)">一致した行を全部コピー(型式・品名・個数)</button> <button class="sm pri" onclick="cpMany('OKDONE',false)">一致+私が『確認した』行をコピー</button> <button class="sm" onclick="cpMany('OKDONE',true)">会社名・発注書名つきでコピー</button></div>
 <div class="fbar">${btn('ALL','すべて','')}${btn('DIFF','❌ 違い','c-ng')}${btn('REV','⚠ 要確認','c-rv')}${btn('OK','✅ 一致','c-ok')}${btn('NP','相手なし','c-np')}</div>
 <table class="fst"><tr><th>結果</th><th>見た目(押すと拡大)</th><th>社</th><th>種類</th><th>ファイル</th><th>相手のファイル</th><th>理由</th></tr>${L.map(f=>`<tr data-v="${f.v}"><td><b>${VL[f.v]}</b></td><td>${thumb(f.pid,f.anchor)}</td><td>${esc(f.vendor)}</td><td>${esc(f.role)}</td><td><a href="#${f.anchor}" onclick="document.getElementById('${f.anchor}').scrollIntoView({block:'start'});return false">${esc(f.name)}</a></td><td>${f.partners.size?[...f.partners].map(esc).join('<br>'):'<small>(なし)</small>'}</td><td>${f.tags.length?f.tags.join(' / '):(f.v==='OK'?'全行が一致':'')}</td></tr>`).join('')}</table></div>`}
 function fsFilter(k){
@@ -232,12 +235,20 @@ function fsFilter(k){
  document.querySelectorAll('.fb').forEach(b=>b.classList.toggle('on',b.dataset.f===k));
  try{window.FS_FILTER=k}catch(e){}
 }
+function toast(m){let d=document.getElementById('toast');if(!d){d=document.createElement('div');d.id='toast';d.style.cssText='position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#1f6f43;color:#fff;padding:10px 18px;border-radius:8px;font-size:14px;z-index:99999;box-shadow:0 2px 10px #0004;max-width:80vw';document.body.appendChild(d)}d.textContent=m;d.style.display='block';clearTimeout(d._t);d._t=setTimeout(()=>d.style.display='none',2600)}
+async function copyTxt(t,msg){try{await navigator.clipboard.writeText(t);toast(msg||'コピーしました')}catch(e){const a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();try{if(!document.execCommand('copy'))throw 0;toast(msg||'コピーしました')}catch(_){prompt('自動でコピーできませんでした。下の文字を選んで、コピーしてください',t)}a.remove()}}
+function cpLine(r,withDoc){const c=r.cp||{};const base=[c.model||'',c.name||'',c.qty==null?'':c.qty];return (withDoc?[r._vendor||'',r._odoc||'']:[]).concat(base).join('\t')}
+function cpRow(i){const r=window.CPROWS[i];if(!r)return;copyTxt(cpLine(r,false),'コピーしました: 型式・品名・個数(タブ区切り。別の画面に貼り付けられます)')}
+function cpCell(el){copyTxt(el.dataset.t||'','コピーしました: '+(el.dataset.t||''))}
+function cpMany(kind,withDoc,pairId){const L=(window.CPROWS||[]).filter(r=>(!pairId||r._pair===pairId)&&(kind==='OK'?r.status==='OK':(r.status==='OK'||(r._item!=null&&ITEMS[r._item]&&ITEMS[r._item].done))));
+ if(!L.length){toast('コピーできる行がありません');return}
+ copyTxt(L.map(r=>cpLine(r,withDoc)).join('\n'),`${L.length}行をコピーしました(型式・品名・個数。Excelや別の画面に貼り付けられます)`)}
 async function copyFS(){const t=window.FS_TEXT||'';try{await navigator.clipboard.writeText(t);alert('コピーしました。Excelに貼り付けられます')}catch(e){const a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();try{document.execCommand('copy');alert('コピーしました')}catch(_){prompt('コピーできませんでした。下を選んでコピーしてください',t)}a.remove()}}
 function chips(c){return `<span class="chip c-ok">✅ 確実に一致 <b>${c.OK}</b></span><span class="chip c-img">☑ 画像で一致(目で確認) <b>${c.OK_IMG}</b></span><span class="chip c-ng">❌ 違い <b>${c.DIFF}</b></span><span class="chip c-rv">⚠ 要確認 <b>${c.REVIEW}</b></span><span class="chip c-no" title="見積にあるが、発注書に無い品目(数量減・見送りの可能性)">📋 発注されなかった品目 <b>${c.NOORDER||0}</b></span><span class="chip c-np">相手なし <b>${c.NOPAIR}</b>組</span>`}
 function rowHtml(r,idx){
  const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',NOORDER:'📋 発注されなかった品目',OK_IMG:'☑ 画像で一致'}[r.status];
  const side=(lab,img,raw)=>`<div><small>${lab}</small>${img?`<img src="data:image/png;base64,${img}">`:(raw?`<div class="raw">${esc(raw)}</div>`:'<small>(なし)</small>')}</div>`;
- return `<div class="row ${r.status}" id="row${idx}"><label class="chk"><input type="checkbox" id="chk${idx}" onchange="setDone(${idx},this.checked)"> 確認した</label><span class="mdl">${mark} ${esc(r.model)}</span> <button class="sm" onclick="openV(${idx})">書類全体で見る</button>${r.msg?`<div class="msg">${esc(r.msg)}</div>`:''}${r.checks?`<div>${ckHtml(r.checks)}</div>`:''}<div class="two">${side(ROLES[0],r.qimg,r.qraw)}${side(ROLES[1],r.oimg,r.oraw)}</div></div>`;
+ return `<div class="row ${r.status}" id="row${idx}"><label class="chk"><input type="checkbox" id="chk${idx}" onchange="setDone(${idx},this.checked)"> 確認した</label><span class="mdl">${mark} ${esc(r.model)}</span> <button class="sm" onclick="openV(${idx})">書類全体で見る</button> <button class="sm" onclick="cpRow(${r._ci})" title="型式・品名・個数をコピー(発注書の側の中身)">この行をコピー</button>${r.msg?`<div class="msg">${esc(r.msg)}</div>`:''}${r.checks?`<div>${ckHtml(r.checks)}</div>`:''}<div class="two">${side(ROLES[0],r.qimg,r.qraw)}${side(ROLES[1],r.oimg,r.oraw)}</div></div>`;
 }
 function setDone(i,v){ITEMS[i].done=v;const c=$('chk'+i);if(c)c.checked=v;const r=$('row'+i);if(r)r.classList.toggle('done',v);if(CUR===i)$('vchk').checked=v;todo()}
 /* ---- 確認ビュー: 書類全体に枠で位置を示し、要確認を順番に見る ---- */

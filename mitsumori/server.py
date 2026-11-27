@@ -140,6 +140,11 @@ def serialize(vendors):
                     if d and rr and not r.get("doc"):
                         bx = C.row_box(d, rr)
                         row["m" + side + "box"] = bx; row["m" + side + "pno"] = rr.get("page", 0) if bx else None
+                _qr, _or = r["qrow"], r["orow"]   # 別の端末へ入力するときの、コピー用の中身。型式・品名は、ひもづいた見積の側(きれいに読めていることが多い)を優先し、個数は、発注書の側(実際に頼む数)を優先する
+                _m = (_qr or {}).get("model_raw") or (_or or {}).get("model_raw") or ""
+                _n = (_qr or {}).get("name") or (_or or {}).get("name") or ""
+                _qt = (_or or {}).get("qty") if (_or or {}).get("qty") is not None else (_qr or {}).get("qty")
+                row["cp"] = {"model": _m, "name": _n, "qty": _qt, "ocr": bool((q and q.src == "ocr") or (o and o.src == "ocr"))}
                 if r["status"] != "OK":
                     row["qimg"] = C.crop_b64(q, r["qrow"]) if q and r["qrow"] else None
                     row["oimg"] = C.crop_b64(o, r["orow"]) if o and r["orow"] else None
