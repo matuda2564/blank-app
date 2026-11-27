@@ -68,12 +68,16 @@ button.sm.pri{background:var(--pri);color:#fff}
 <header><h1 id="ttl">見積・発注 照合</h1><small id="ver"></small><small>書類はこのパソコンの中だけで処理します(外には送りません)</small></header>
 <div class="bn ng" id="conn" hidden></div>
 <div class="bn rv" id="hl" hidden></div>
-<nav class="tabs"><button id="tab-qo" class="on">見積 ⇔ 発注</button><button id="tab-qq">見積 ⇔ 見積(客先に出した見積 と 仕入先の見積)</button></nav>
+<nav class="tabs"><button id="tab-qo" class="on">見積 ⇔ 発注</button><button id="tab-qq">見積 ⇔ 見積(客先に出した見積 と 仕入先の見積)</button><button id="tab-ks">京セラ(金額まで合わせる)</button></nav>
 <main>
 <div class="note" id="note-qq" hidden>
 <b>使い方</b>: ①社ごとの枠に、<b>客先に出した見積書</b>と<b>仕入先の見積書</b>を入れる(ドラッグ、またはクリックして選ぶ。PDF・Excel・画像) → ②<b>「照合する」</b> → ③結果を上から確認 → ④終わったら<b>「この社をリセット」</b>で次の社へ。<br>
 判断するのは<b>型式(型番)・品名</b>。<b>個数・単価・金額は、書類ごとに違って当たり前なので、違いにはしません</b>(個数が違うときは、「参考」として、添えて出します)。1枚ずつの組のほか、<b>何枚入れても、行ごとに、型番でひもづけて</b>組にします。<br>
 <b>✅ 確実に一致</b>=文字入りPDF・Excelで型式・品名が一致 / <b>☑ 画像で一致</b>=画像を2種類の読み取りで確認(<b>画像は、品名を機械では判定しません。目で確認してください</b>) / <b>❌ 違い</b>=片方の見積にしかない品目など / <b>⚠ 要確認</b>=読み取れない・自信がない。<b>✅以外は、必ず人が見てください。</b>
+</div>
+<div class="note" id="note-ks" hidden>
+<b>使い方(京セラ用・月に1回の突き合わせ)</b>: ①社の枠に、<b>発注リスト</b>(京セラに頼んだ内容)・<b>自社請求書</b>(こちらが出した請求書)・<b>京セラ請求書</b>(京セラが出してきたリストと金額)を入れる(PDF・Excel・画像。入れた種類の組み合わせだけ、比べます) → ②<b>「照合する」</b> → ③結果を確認。<br>
+<b>型式・品名・個数・単価・金額</b>を、行ごとに比べます。<b>違う品目と、違う金額が、「どの品目の、いくらといくら」と、出ます</b>。<b>金額を読み取れなかった行は、一致にせず、必ず「要確認」</b>にします(金額まで合わせる枠なので)。✅以外は、人が見てください。
 </div>
 <div class="note" id="note-qo">
 <b>使い方</b>: ①社ごとの枠に、<b>見積書</b>と<b>発注書</b>を入れる(ドラッグ、またはクリックして選ぶ。PDF・Excel・画像) → ②<b>「照合する」</b> → ③結果を上から確認 → ④終わったら<b>「全部リセット」</b>。<br>
@@ -105,7 +109,7 @@ button.sm.pri{background:var(--pri);color:#fff}
 </div></div>
 <script>
 const $=id=>document.getElementById(id);
-const MODES={qo:{roles:['見積','発注'],title:'見積・発注 照合'},qq:{roles:['客先見積','仕入先見積'],title:'見積 ⇔ 見積 照合(客先と仕入先)'}};
+const MODES={ks:{roles:['発注リスト','自社請求書','京セラ請求書'],title:'京セラ 照合(金額まで)'},qo:{roles:['見積','発注'],title:'見積・発注 照合'},qq:{roles:['客先見積','仕入先見積'],title:'見積 ⇔ 見積 照合(客先と仕入先)'}};
 let MODE='qo', ROLES=MODES.qo.roles;
 let ST=null, timer=null, PAGES={}, WORDS={}, ITEMS=[], CUR=-1, RSEL=false;
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -120,7 +124,7 @@ function render(){
  for(const s of ST.slots){
   h+=`<div class="slot"><input class="nm" value="${esc(s.name)}" onchange="rename(${s.id},this.value)" ${running?'disabled':''}> <button class="sm" onclick="resetSlot(${s.id})" ${running?'disabled':''}>この社をリセット</button>`;
   for(const r of ROLES){
-   h+=`<div class="dz" data-slot="${s.id}" data-role="${r}"><b>${r}書 (${s[r].length}枚)</b><span class="hint">ここにドラッグ、またはクリックして選ぶ</span>
+   h+=`<div class="dz" data-slot="${s.id}" data-role="${r}"><b>${/書$|リスト$/.test(r)?r:r+'書'} (${s[r].length}枚)</b><span class="hint">ここにドラッグ、またはクリックして選ぶ</span>
    <div class="files">${s[r].map(f=>`<div><span>${esc(f)}</span><button title="外す" onclick="event.stopPropagation();rm(${s.id},'${r}',decodeURIComponent('${encodeURIComponent(f)}'))">✕</button></div>`).join('')}</div></div>`;
   }
   h+=`</div>`;
@@ -131,7 +135,7 @@ function render(){
   z.ondragover=e=>{e.preventDefault();z.classList.add('over')};z.ondragleave=()=>z.classList.remove('over');
   z.ondrop=e=>{e.preventDefault();z.classList.remove('over');if(ST.job.status!=='running')up(z.dataset.slot,z.dataset.role,e.dataTransfer.files)};
  });
- const has=ST.slots.some(s=>s[ROLES[0]].length&&s[ROLES[1]].length);
+ const has=ST.slots.some(s=>ROLES.filter(r=>s[r].length).length>=2);
  $('go').disabled=running||!has; $('reset').disabled=running; $('cancel').hidden=!running;
  const pct=j.total?Math.round(100*j.done/j.total):0;
  $('pb').style.width=(running?pct:(j.status==='done'?100:0))+'%';
@@ -167,7 +171,7 @@ async function showResult(){
   v.warnings.forEach(w=>h+=`<div class="warn">⚠ ${esc(w)}</div>`);
   if(MODE==='qo'&&v.slot&&v.warnings.some(w=>w.includes('中身が「見積」と読める')))h+=`<div class="warn"><button class="sm pri" onclick="moveToQQ(${v.slot})">この社の書類を「見積 ⇔ 見積」のタブへ移す</button> <small>(「見積書」の枠 → 客先に出した見積 / 「発注書」の枠 → 仕入先の見積 に、なります。逆なら、移したあとで、入れ替えてください)</small></div>`;
   for(const p of v.pairs){
-   h+=`<div class="pair" id="${p._id}" data-v="${p._v}"><div class="tt">${ROLES[0]}「${esc(p.q||'(なし)')}」 ⇔ ${ROLES[1]}「${esc(p.o||'(なし)')}」 <span class="meta">(${esc(p.why)})</span></div><div class="thr">${thumb(p.qpage0,p._id)}${thumb(p.opage0,p._id)}</div>`;
+   h+=`<div class="pair" id="${p._id}" data-v="${p._v}"><div class="tt">${rl(p)[0]}「${esc(p.q||'(なし)')}」 ⇔ ${rl(p)[1]}「${esc(p.o||'(なし)')}」 <span class="meta">(${esc(p.why)})</span></div><div class="thr">${thumb(p.qpage0,p._id)}${thumb(p.opage0,p._id)}</div>`;
    if(!(p.q&&p.o)){h+=`<div class="row REVIEW">⚠ 組みにならなかった書類です。人が確認してください。<br><small>理由: ${esc(p.why)}</small></div>${readPanel(p)}</div>`;continue}
    if(p.refcheck)h+=`<div class="ck ${p.refcheck.st}">見積番号の突き合わせ: ${p.refcheck.st==='ok'?'○':(p.refcheck.st==='ng'?'✕ ':'ー ')}${esc(p.refcheck.detail)}</div>`;
    h+=`<div class="meta">比べた項目: ${esc(p.compared.join('・'))}${p.skipnote?` / 比べない項目: ${esc(p.skipnote)}`:(p.skipped.length?` / 比べなかった項目(片方の書類に無い): ${esc(p.skipped.join('・'))}`:'')}</div>`;
@@ -175,8 +179,8 @@ async function showResult(){
    const order={DIFF:0,REVIEW:1,NOORDER:2,OK_IMG:3,OK:4};
    const rows=p.rows.slice().sort((a,b)=>order[a.status]-order[b.status]);
    const okr=rows.filter(r=>r.status==='OK');
-   rows.forEach(r=>{r._vendor=v.vendor;r._odoc=p.o||p.q||'';r._pair=p._id;r._ci=window.CPROWS.length;window.CPROWS.push(r)});
-   rows.filter(r=>r.status!=='OK').forEach(r=>{r._item=ITEMS.length;ITEMS.push({row:r,vendor:v.vendor,pair:`${ROLES[0]}「${p.q}」⇔${ROLES[1]}「${p.o}」`,done:false});h+=rowHtml(r,ITEMS.length-1)});
+   rows.forEach(r=>{r._rl=rl(p);r._vendor=v.vendor;r._odoc=p.o||p.q||'';r._pair=p._id;r._ci=window.CPROWS.length;window.CPROWS.push(r)});
+   rows.filter(r=>r.status!=='OK').forEach(r=>{r._item=ITEMS.length;ITEMS.push({row:r,vendor:v.vendor,pair:`${rl(p)[0]}「${p.q}」⇔${rl(p)[1]}「${p.o}」`,done:false});h+=rowHtml(r,ITEMS.length-1)});
    if(okr.length)h+=`<details><summary>✅ 確実に一致した行 (${okr.length}行)</summary><div style="margin:4px 0"><button class="sm pri" onclick="cpMany('OK',false,'${p._id}')">この書類の一致した行を、全部コピー</button> <small>(型式・品名・個数。別の端末の入力画面へ貼れます。文字を押すと、その文字だけコピー)</small></div><table class="rd cpt"><tr><th>型式</th><th>品名</th><th>個数</th><th></th></tr>${okr.map(r=>cpTr(r)).join('')}</table></details>`;
    h+=`</div>`;
   }
@@ -187,13 +191,13 @@ async function showResult(){
 function cpTr(r){const c=r.cp||{};const cell=(t)=>`<td class="cpc" data-t="${esc(String(t==null?'':t))}" onclick="cpCell(this)" title="押すとコピー">${esc(String(t==null?'':t))}</td>`;return `<tr>${cell(c.model)}${cell(c.name)}${cell(c.qty)}<td><button class="sm" onclick="cpRow(${r._ci})">1行コピー</button></td></tr>`}
 function readPanel(p){
  const one=(lab,d)=>d?`<div><b>${esc(lab)}「${esc(d.name)}」</b> <small>(${esc(d.kind||'種類不明')}・${d.mode==='qq'?d.rows.length+'個の型番を発見':d.rows.length+'行を読み取り'})</small>${d.region?`<div class="meta">読んだ範囲: ${esc(d.region)}</div>`:''}${d.mode==='qq'?(d.rows.length?`<table class="rd"><tr><th>見つけた型番</th><th>その行の文字</th><th>確実?</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.m)}</td><td>${esc(r.n||'')}</td><td>${r.sure?'○':(r.noise?'ゴミの疑い(無視)':'要確認')}</td></tr>`).join('')}</table>`:`<div class="warn">型番らしい文字列を、1つも見つけられませんでした(読み取った行: ${d.nlines}行)</div>`):(d.rows.length?`<table class="rd"><tr><th>型式(読んだまま)</th><th>品名</th><th>数量</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.m)}</td><td>${esc(r.n||'')}</td><td>${esc(r.q==null?'':r.q)}</td></tr>`).join('')}</table>`:'<div class="warn">明細の行を、1行も読めませんでした</div>')}${d.notes.length?`<div class="meta">注意: ${esc(d.notes.join(' / '))}</div>`:''}</div>`:'';
- return `<details class="rdp"><summary>読み取った中身を見る(ツールが、書類から、何を読んだか)</summary><div class="two">${one(ROLES[0],p.qread)}${one(ROLES[1],p.oread)}</div></details>`}
+ return `<details class="rdp"><summary>読み取った中身を見る(ツールが、書類から、何を読んだか)</summary><div class="two">${one(rl(p)[0],p.qread)}${one(rl(p)[1],p.oread)}</div></details>`}
 function thumb(pid,anchor){return pid&&PAGES[pid]?`<img class="th" src="${PAGES[pid]}" title="押すと、見積と発注書を、並べて拡大します" onclick="openPairView('${anchor}')">`:'<small>(画像なし)</small>'}
 function openPairView(id){
  const p=(window.PAIRMAP||{})[id];if(!p)return;
- $('vw').hidden=false;$('vcnt').textContent='';$('vtitle').textContent=`${p._vendor} ・ ${ROLES[0]}「${p.q||'(なし)'}」⇔${ROLES[1]}「${p.o||'(なし)'}」`;
+ $('vw').hidden=false;$('vcnt').textContent='';$('vtitle').textContent=`${p._vendor} ・ ${rl(p)[0]}「${p.q||'(なし)'}」⇔${rl(p)[1]}「${p.o||'(なし)'}」`;
  $('vmsg').innerHTML=`<b>${VL[p._v]}</b> — ${esc(p.why)}`;
- $('vql').textContent=ROLES[0]+'(ホイール=拡大縮小 / 引っぱる=移動)';$('vol').textContent=ROLES[1]+'(ホイール=拡大縮小 / 引っぱる=移動)';
+ $('vql').textContent=rl(p)[0]+'(ホイール=拡大縮小 / 引っぱる=移動)';$('vol').textContent=rl(p)[1]+'(ホイール=拡大縮小 / 引っぱる=移動)';
  pane($('vq'),p.qpage0,null,null,'OK',false);pane($('vo'),p.opage0,null,null,'OK',false);
  const LAB={OK:'一致',DIFF:'違い',REVIEW:'要確認',OK_IMG:'画像で一致',NOORDER:'発注されなかった'};
  let chips='',num=0;
@@ -207,6 +211,7 @@ function openPairView(id){
  for(const id2 of ['vq','vo']){const el=$(id2);if(el._home)el._home()}
  CUR=-1;$('vprev').disabled=true;$('vnext').disabled=true;$('vchk').checked=false;$('vok').style.display='none';$('vchk').parentElement.style.display='none';
 }
+function rl(p){return (p&&p.rl)||ROLES}
 function verdictOf(c,nopair){return nopair?'NP':c.DIFF?'DIFF':(c.REVIEW||c.NOORDER||c.OK_IMG)?'REV':'OK'}
 const VL={DIFF:'❌ 違い',REV:'⚠ 要確認',NP:'相手なし',OK:'✅ 一致'};
 function fileSummary(R){
@@ -215,8 +220,8 @@ function fileSummary(R){
  for(const v of R)for(const p of v.pairs){
   const id='pr'+(n++);p._id=id;p._vendor=v.vendor;window.PAIRMAP[id]=p;const both=p.q&&p.o;
   const pc={};for(const r of p.rows)pc[r.status]=(pc[r.status]||0)+1;p._v=verdictOf(pc,!both);
-  for(const [role,name,other] of [[ROLES[0],p.q,p.o],[ROLES[1],p.o,p.q]]){
-   if(!name)continue;const f=get(v,role,name);f.anchor=f.anchor||id;f.pid=f.pid||(role===ROLES[0]?p.qpage0:p.opage0);
+  for(const [role,name,other] of [[rl(p)[0],p.q,p.o],[rl(p)[1],p.o,p.q]]){
+   if(!name)continue;const f=get(v,role,name);f.anchor=f.anchor||id;f.pid=f.pid||(name===p.q?p.qpage0:p.opage0);
    if(!both){f.nopair=true;continue}
    f.partners.add(other);for(const r of p.rows)f.c[r.status]=(f.c[r.status]||0)+1}}
  const L=[];
@@ -251,7 +256,7 @@ function chips(c){return `<span class="chip c-ok">✅ 確実に一致 <b>${c.OK}
 function rowHtml(r,idx){
  const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',NOORDER:'📋 発注されなかった品目',OK_IMG:'☑ 画像で一致'}[r.status];
  const side=(lab,img,raw)=>`<div><small>${lab}</small>${img?`<img src="data:image/png;base64,${img}">`:(raw?`<div class="raw">${esc(raw)}</div>`:'<small>(なし)</small>')}</div>`;
- return `<div class="row ${r.status}" id="row${idx}"><label class="chk"><input type="checkbox" id="chk${idx}" onchange="setDone(${idx},this.checked)"> 確認した</label><span class="mdl">${mark} ${esc(r.model)}</span> <button class="sm" onclick="openV(${idx})">書類全体で見る</button> <button class="sm" onclick="cpRow(${r._ci})" title="型式・品名・個数をコピー(発注書の側の中身)">この行をコピー</button>${r.msg?`<div class="msg">${esc(r.msg)}</div>`:''}${r.checks?`<div>${ckHtml(r.checks)}</div>`:''}<div class="two">${side(ROLES[0],r.qimg,r.qraw)}${side(ROLES[1],r.oimg,r.oraw)}</div></div>`;
+ return `<div class="row ${r.status}" id="row${idx}"><label class="chk"><input type="checkbox" id="chk${idx}" onchange="setDone(${idx},this.checked)"> 確認した</label><span class="mdl">${mark} ${esc(r.model)}</span> <button class="sm" onclick="openV(${idx})">書類全体で見る</button> <button class="sm" onclick="cpRow(${r._ci})" title="型式・品名・個数をコピー(発注書の側の中身)">この行をコピー</button>${r.msg?`<div class="msg">${esc(r.msg)}</div>`:''}${r.checks?`<div>${ckHtml(r.checks)}</div>`:''}<div class="two">${side((r._rl||ROLES)[0],r.qimg,r.qraw)}${side((r._rl||ROLES)[1],r.oimg,r.oraw)}</div></div>`;
 }
 function setDone(i,v){ITEMS[i].done=v;const c=$('chk'+i);if(c)c.checked=v;const r=$('row'+i);if(r)r.classList.toggle('done',v);if(CUR===i)$('vchk').checked=v;todo()}
 /* ---- 確認ビュー: 書類全体に枠で位置を示し、要確認を順番に見る ---- */
@@ -323,7 +328,7 @@ function showV(i){
  const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',NOORDER:'📋 発注されなかった品目',OK_IMG:'☑ 画像で一致'}[r.status];
  $('vcnt').textContent=`${i+1} / ${ITEMS.length}`;$('vtitle').textContent=`${it.vendor} ・ ${it.pair}`;
  $('vmsg').innerHTML=`<b>${mark} ${esc(r.model)}</b>${r.msg?' — '+esc(r.msg):''}<div>${ckHtml(r.checks)}</div>`;
- $('vql').textContent=ROLES[0]+'(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)';$('vol').textContent=ROLES[1]+'(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)';pane($('vq'),r.qpage,r.qbox,r.qraw,r.status,r.qnomatch);pane($('vo'),r.opage,r.obox,r.oraw,r.status,r.onomatch);$('vq')._rows=r.qbox?[{box:r.qbox,cp:r.cp}]:[];$('vo')._rows=r.obox?[{box:r.obox,cp:r.cp}]:[];
+ $('vql').textContent=(r._rl||ROLES)[0]+'(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)';$('vol').textContent=(r._rl||ROLES)[1]+'(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)';pane($('vq'),r.qpage,r.qbox,r.qraw,r.status,r.qnomatch);pane($('vo'),r.opage,r.obox,r.oraw,r.status,r.onomatch);$('vq')._rows=r.qbox?[{box:r.qbox,cp:r.cp}]:[];$('vo')._rows=r.obox?[{box:r.obox,cp:r.cp}]:[];
  $('vchk').checked=it.done;$('vprev').disabled=i===0;$('vnext').disabled=i===ITEMS.length-1;
 }
 function openV(i){$('vw').hidden=false;showV(i)}
@@ -339,12 +344,12 @@ $('save').onclick=async()=>{const css=document.querySelector('style').textConten
 async function health(n){try{const h=await api('/api/health');if(h.state==='checking'&&n<20){setTimeout(()=>health(n+1),1500);return}if(h.state==='done'&&!h.ok){const bad=[!h.rapid?'RapidOCR':'',!h.tess?'Tesseract':''].filter(x=>x).join('・');$('hl').hidden=false;$('hl').textContent='⚠ 画像(スキャン)を読み取る部品が、このパソコンで動いていません('+bad+')。文字入りのPDFとExcelは使えますが、画像・スキャンの書類は、全部「要確認」になります。'+(h.msg?' 詳細: '+h.msg:'')}}catch(e){}}
 function setMode(m){
  MODE=m;ROLES=MODES[m].roles;
- $('tab-qo').classList.toggle('on',m==='qo');$('tab-qq').classList.toggle('on',m==='qq');
- $('ttl').textContent=MODES[m].title;$('note-qo').hidden=m!=='qo';$('note-qq').hidden=m!=='qq';$('qtyrow').hidden=true;
+ $('tab-qo').classList.toggle('on',m==='qo');$('tab-qq').classList.toggle('on',m==='qq');$('tab-ks').classList.toggle('on',m==='ks');
+ $('ttl').textContent=MODES[m].title;$('note-qo').hidden=m!=='qo';$('note-qq').hidden=m!=='qq';$('note-ks').hidden=m!=='ks';$('qtyrow').hidden=true;
  $('out').innerHTML='';$('save').style.display='none';$('vw').hidden=true;ITEMS=[];
  try{history.replaceState(null,'','#'+m)}catch(e){}
  refresh().then(()=>{if(!ST)return;if(ST.job.status==='running')poll();else if(ST.job.status==='done'&&ST.job.mode===MODE)showResult()});
 }
-$('tab-qo').onclick=()=>setMode('qo');$('tab-qq').onclick=()=>setMode('qq');
-setMode(location.hash==='#qq'?'qq':'qo');health(0);
+$('tab-qo').onclick=()=>setMode('qo');$('tab-qq').onclick=()=>setMode('qq');$('tab-ks').onclick=()=>setMode('ks');
+setMode(['qq','ks'].includes(location.hash.slice(1))?location.hash.slice(1):'qo');health(0);
 </script></body></html>

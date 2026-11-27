@@ -1289,7 +1289,7 @@ def read_many(jobs, workers=4, progress=None, cancel=None):
     return out
 
 
-ROLES_BY_MODE = {"qo": ("見積", "発注"), "qq": ("客先見積", "仕入先見積")}   # qo=見積⇔発注 / qq=見積⇔見積(客先と仕入先)
+ROLES_BY_MODE = {"qo": ("見積", "発注"), "qq": ("客先見積", "仕入先見積"), "ks": ("発注リスト", "自社請求書", "京セラ請求書")}   # qo=見積⇔発注 / qq=見積⇔見積(客先と仕入先)
 SKIPNOTE_QQ = "品名・数量・単価・金額・合計・納期・単位(書類ごとに違って当たり前なので、比べません)"
 
 
@@ -1330,9 +1330,9 @@ def run_vendor(vdir, workers=4, progress=None, name=None, mode="qo", with_qty=Fa
         for fn in sorted(os.listdir(rd)):
             if fn.lower().endswith(EXTS):
                 jobs.append((os.path.join(rd, fn), role))
-    docs = {roles[0]: [], roles[1]: []}
+    docs = {r: [] for r in roles}
     for d in read_many(jobs, workers, progress, cancel):
-        k = kind_of(d.text)
+        k = kind_of(d.text) if mode != "ks" else None
         if mode == "qo":
             if k and k != d.role:
                 out["warnings"].append(f"{d.role}フォルダの「{d.name}」は、中身が「{k}」と読める。入れる場所を間違えていないか確認してください" + ("(見積同士を比べるときは、上の「見積 ⇔ 見積」のタブを使います)" if k == "見積" and d.role == "発注" else ""))
@@ -1342,6 +1342,18 @@ def run_vendor(vdir, workers=4, progress=None, name=None, mode="qo", with_qty=Fa
         except Exception as e: log(f"apply_item_rows失敗 {d.name}: {e!r}")
         docs[d.role].append(d)
     out["seconds"] = sum(d.seconds for r in docs.values() for d in r)
+    if mode == "ks":   # 京セラ: 3種類の書類の、どの2つも、型式・品名・個数・単価・金額を、行ごとに比べる
+        import qo_engine
+        for a, b in ((0, 2), (1, 2), (0, 1)):
+            ra, rb = roles[a], roles[b]
+            if not (docs[ra] and docs[rb]): continue
+            try:
+                for q, o, why, results, compared, skipped in qo_engine.build(docs[ra], docs[rb], "ks", (ra, rb)):
+                    out["pairs"].append({"q": q, "o": o, "why": why, "results": results, "compared": compared, "skipped": skipped, "mode": "ks", "rl": [ra, rb], "skipnote": None})
+            except Exception:
+                log("京セラの照合が失敗: " + traceback.format_exc())
+                out["warnings"].append(f"「{ra}」と「{rb}」の照合に失敗しました(ログに残しました)。人が確認してください")
+        return out
     A, B = docs[roles[0]], docs[roles[1]]
     if mode in ("qo", "qq"):
         try:
