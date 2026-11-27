@@ -172,13 +172,20 @@ def smoke(outpath):
         call("/api/run?mode=qo", "POST", b""); wait()
         vv = call("/api/result")[1]["result"]["vendors"][0]
         chk("見積同士を「見積⇔発注」に入れたら、「見積⇔見積のタブを使う」と案内する", any("見積 ⇔ 見積" in w for w in vv["warnings"]), vv["warnings"])
-        chk("組にならなかった理由が、数字つきで、わかる", any("重なり" in x["why"] for x in vv["pairs"]), [x["why"] for x in vv["pairs"]])
+        chk("組にした根拠(何行がひもづいたか)が、わかる", any("ひもづ" in x["why"] and "根拠" in x["why"] for x in vv["pairs"]), [x["why"] for x in vv["pairs"]])
         chk("ツールが書類から読んだ中身(型式・数量)が、画面用に、出る", any((x.get("qread") or x.get("oread") or {}).get("rows") for x in vv["pairs"]))
         chk("社の番号が、結果に入っている(移すボタン用)", vv.get("slot") == 4, vv.get("slot"))
         mv = call("/api/move?slot=4", "POST", b"")[0]
         qs = call("/api/state?mode=qq")[1]["slots"][3]
         chk("ボタン1つで、見積⇔見積のタブへ書類を移せる", mv == 200 and qs["客先見積"] == ["a.pdf"] and qs["仕入先見積"] == ["b.pdf"], qs)
         call("/api/reset?mode=qq", "POST", b"")
+
+        # 3.6 型番が1つも重ならない書類は、組にせず、理由が、わかる
+        call("/api/reset?mode=qo", "POST", b"")
+        up("qo", 4, "見積", "a2.pdf", pdf("御見積書", A)); up("qo", 4, "発注", "z.pdf", pdf("注文書", [("MR-J4-10A", "アンプ", 1, 48500)]))
+        call("/api/run?mode=qo", "POST", b""); wait()
+        vz = call("/api/result")[1]["result"]["vendors"][0]
+        chk("組にならなかった理由が、わかる(ひもづく行が1つも無い)", any(x["q"] is None and "ひもづく行が、1つも無い" in x["why"] for x in vz["pairs"]) and any(x["o"] is None for x in vz["pairs"]), [x["why"] for x in vz["pairs"]])
 
         # 4 中止(止まったときの、逃げ道)
         call("/api/reset?mode=qo", "POST", b""); call("/api/reset?mode=qq", "POST", b"")
