@@ -917,9 +917,9 @@ def apply_item_rows(d):
             o = m2.get(k)
             if not v["sure"]: r["unverified"] = True; r.setdefault("unv_why", []).append("型式が、2種類の読み取りの片方でしか、見つからない")
             if o:
-                if any(o.get(x) != r.get(x) for x in ("qty", "price", "amount")): r["problems"].append("画像の2種類の読み取りで、数量・単価・金額が食い違う")
-            elif not (r.get("qty") and r.get("price") and r.get("amount") is not None):
-                r["unverified"] = True; r.setdefault("unv_why", []).append("数量・単価・金額を、2種類の読み取りで確かめられない(見出しの列を読めなかった)")
+                if o.get("qty") != r.get("qty"): r["problems"].append("画像の2種類の読み取りで、数量が食い違う")
+            elif not r.get("qty"):
+                r["unverified"] = True; r.setdefault("unv_why", []).append("数量を、2種類の読み取りで確かめられない(見出しの列を読めなかった)")
             r["exact"] = not r["problems"] and not r.get("unverified")
             keep.append(r)
         r1 = keep

@@ -41,6 +41,8 @@ def draw(path, kind, cust, no, ref, items, style, y0=170):
     for x, h in ((60, "メーカー・品名"), (360, "数 量"), (405, "単位"), (445, "単 価"), (505, "金 額")): t((x, y0 - 14), h, 10)
     y, tot = y0 + 6, 0
     for i, it in enumerate(items, 1):
+        it = dict(it)
+        if kind == "発注" and not it.get("keepprice"): it["price"] = int(it["price"] * 0.93)   # 発注書の単価・金額は、見積と違って当たり前(比べない)
         amt = it["qty"] * it["price"]; tot += amt
         mdl = it["model"]
         if it.get("writeas"): mdl = it["writeas"]
@@ -50,7 +52,10 @@ def draw(path, kind, cust, no, ref, items, style, y0=170):
             if mdl: t((60, y + 11), mdl, f="helv")
             y += 30
         else:            # 型番と品名が同じ行
-            t((50, y), str(i), f="helv"); t((60, y), f"{mdl} {it['name']}" if mdl else it["name"], f="helv" if mdl else "japan"); nums(y); y += 20
+            t((50, y), str(i), f="helv")
+            if mdl: t((60, y), mdl, f="helv"); t((60 + 6 * len(mdl) + 10, y), it["name"])
+            else: t((60, y), it["name"])
+            nums(y); y += 20
     t((60, y + 4), "以下余白", 9)
     t((445, y + 24), "合計", 10); t((505, y + 24), f"{tot:,}", f="helv")
     t((50, y + 60), "備考: 納期は別途ご連絡します。型式変更 KQ2-10A は対象外です。", 9)
@@ -87,7 +92,7 @@ def build(out):
         if ci == 0: truth_q[(q1, "")] = "ORDERED"
         if ci == 2:      # ⑩ 同じ型番を、単価違いで2回見積(改訂)→ 発注は、新しいほうの単価
             x = MODELS[0]; qa, _ = add_q(ci, [item(x, 2, 4200)]); qb, _ = add_q(ci, [item(x, 2, 3900)])
-            pz = add_p(ci, [item(x, 2, 3900)], None); truth_po[(pz, x)] = {"q": qb, "expect": "OK"}; truth_q[(qb, x)] = "ORDERED"
+            pz = add_p(ci, [dict(item(x, 2, 3900), keepprice=True)], None); truth_po[(pz, x)] = {"q": qb, "expect": "OK"}; truth_q[(qb, x)] = "ORDERED"
         if ci == 1:      # ⑥ 見積2・見積3の中身を、1枚の発注書に(見積番号なし)
             it = [item(e, 4), item(f_, 3), item(m3a, 2)]
             p2 = add_p(ci, it, None)
