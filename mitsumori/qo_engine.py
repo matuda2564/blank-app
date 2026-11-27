@@ -82,7 +82,8 @@ def val_agree(a, b):
 
 
 class Ctx:
-    def __init__(self, quotes, orders):
+    def __init__(self, quotes, orders, mode="qo"):
+        self.mode = mode
         self.q, self.o = quotes, orders
         self.selfs = learn_self(orders)
         self.comp = {id(d): company_of(d, self.selfs) for d in quotes + orders}
@@ -91,6 +92,7 @@ class Ctx:
 
     def pair_ev(self, q, o):
         """書類どうしの、根拠(点数と、説明のリスト)"""
+        if self.mode == "qq": return 0, [], None   # 客先見積と仕入先見積は、会社名も見積番号も違って当たり前。型番の行の重なりだけで、組にする
         pts, ev = 0, []
         cq, co = self.comp[id(q)], self.comp[id(o)]
         cs = nsim(cq, co) if cq and co else None
@@ -127,9 +129,9 @@ def line_edges(ctx, q, o):
     return out
 
 
-def match(quotes, orders):
+def match(quotes, orders, mode="qo"):
     """全部の見積の行 × 全部の発注書の行から、1対1のひもづけを、強い順に、決める"""
-    ctx = Ctx(quotes, orders)
+    ctx = Ctx(quotes, orders, mode)
     edges = []
     for qd in quotes:
         for od in orders:
@@ -183,11 +185,18 @@ def name_sim(a, b):
 NAME_NG = 0.3   # これ未満は、品名が違う可能性
 
 
+def tr(s, qq):
+    """見積⇔見積のときは、画面に出す文言の『見積』『発注書』を、『客先見積』『仕入先見積』に言い換える"""
+    if not qq or not s: return s
+    return s.replace("発注書", "\x01").replace("発注", "\x02").replace("見積", "客先見積").replace("\x01", "仕入先見積").replace("\x02", "仕入先")
+
+
 def row_result(ctx, q, o, qr, pr, kind, extra=None):
     """ひもづいた1組の行の、判定。**比べるのは、型式・品名・個数だけ**。単価・金額は、見積と発注書で、違って当たり前なので、比べない"""
-    ck = [("見積番号",) + C.quote_check(q, o)]
+    qq = ctx.mode == "qq"
+    ck = [] if qq else [("見積番号",) + C.quote_check(q, o)]
     cq, co = ctx.comp[id(q)], ctx.comp[id(o)]
-    if cq and co: ck.append(("会社名", "ok" if nsim(cq, co) >= 0.75 else "na", "同じ" if nsim(cq, co) >= 0.75 else f"見積 {cq} / 発注書 {co}"))
+    if cq and co and not qq: ck.append(("会社名", "ok" if nsim(cq, co) >= 0.75 else "na", "同じ" if nsim(cq, co) >= 0.75 else f"見積 {cq} / 発注書 {co}"))
     ck.append(("型式", "ok" if kind in ("exact", "split", "spaced") else "na", ("一致" if kind in ("exact", "split") else "書き方(空白・区切り)が違うが、同じ型番(見積 " + (qr.get("model_raw") or "") + " / 発注書 " + (pr.get("left") or "")[:30] + ")") if kind in ("exact", "split", "spaced") else ("近い型番(見積 " + (qr.get("model_raw") or "なし") + " / 発注書 " + (pr.get("model_raw") or "なし") + ")" if kind == "near" else "型番が無い行(品名で判断)")))
     ns = name_sim(qr.get("name"), pr.get("name"))
     if q.src == "ocr" or o.src == "ocr":   # 画像の日本語は、読み間違いが多いので、品名では、判定しない(画像を見て確認)
@@ -200,8 +209,10 @@ def row_result(ctx, q, o, qr, pr, kind, extra=None):
     if extra: vb = extra["qty"]
     if va is not None and vb is not None:
         same = va == vb
-        ck.append(("個数", "ok" if same else "ng", "一致" if same else f"見積 {va:,} / 発注 {vb:,}"))
-        if not same: diffs.append(f"個数: 見積「{va:,}」⇔ 発注「{vb:,}」")
+        if qq: ck.append(("個数", "ok" if same else "na", "同じ" if same else f"客先 {va:,} / 仕入先 {vb:,}(参考。個数が違っても、違いにはしません)"))
+        else:
+            ck.append(("個数", "ok" if same else "ng", "一致" if same else f"見積 {va:,} / 発注 {vb:,}"))
+            if not same: diffs.append(f"個数: 見積「{va:,}」⇔ 発注「{vb:,}」")
     else:
         found = (va is None and q.src == "ocr" and vb is not None and C._found_num(q, vb)) or (vb is None and o.src == "ocr" and va is not None and C._found_num(o, va))
         ck.append(("個数", "ok" if found else "na", "画像の文字の中に、同じ数字があった" if found else "読み取れず"))
@@ -212,7 +223,11 @@ def row_result(ctx, q, o, qr, pr, kind, extra=None):
     label = (qr.get("model_raw") or pr.get("model_raw") or qr.get("name") or pr.get("name") or "(型番なし)")[:22]
     name_ng = ns is not None and ns < NAME_NG
     name_msg = f"品名が違う可能性: 見積「{(qr.get('name') or '')[:24]}」⇔ 発注書「{(pr.get('name') or '')[:24]}」" if name_ng else ""
-    res = lambda st, msg: {"status": st, "model": label, "msg": msg, "qrow": qr, "orow": pr, "checks": ck}
+    qty_note = f"個数が違う(参考): 客先 {va:,} / 仕入先 {vb:,}" if (qq and va is not None and vb is not None and va != vb) else ""
+    def res(st, msg):
+        msg = tr(msg, qq)
+        if qty_note: msg = (msg + " / " if msg else "") + qty_note
+        return {"status": st, "model": label, "msg": msg, "qrow": qr, "orow": pr, "checks": [(a, b, tr(c, qq)) for a, b, c in ck]}
     if kind == "near":
         return res("REVIEW", "型番が1〜2文字違う行を、同じ品目と見て、ひもづけた(見間違いか本当の違いか、確認してください)。" + " / ".join(diffs + ([name_msg] if name_msg else [])))
     if kind == "name":
@@ -231,15 +246,17 @@ def row_result(ctx, q, o, qr, pr, kind, extra=None):
     return res("OK_IMG" if ocr else "OK", "")
 
 
-def build(quotes, orders):
+def build(quotes, orders, mode="qo"):
     """戻り: [(見積|None, 発注書|None, 理由, 結果の一覧, 比べた項目, 比べなかった項目)]"""
     if not quotes and not orders: return []
-    ctx, qline, pline, split, byid, amb = match(quotes, orders)
+    qq = mode == "qq"
+    ctx, qline, pline, split, byid, amb = match(quotes, orders, mode)
     # 書類どうしの、結びつき(ひもづいた行の数)
     link = {}
     for (dq, qi), (do, pi, kind, sc) in qline.items(): link.setdefault((dq, do), []).append((qi, pi, kind))
     for (dq, qi), lst in split.items():
         for do, pi in lst: link.setdefault((dq, do), []).append((qi, pi, "split"))
+    if qq and len(quotes) == 1 and len(orders) == 1 and not link: link[(id(quotes[0]), id(orders[0]))] = []   # 見積番号が違うのが普通なので、1枚ずつなら、迷わず組にする
     # 各書類の『主な相手』(いちばん、行がひもづいた相手)
     main_q = {}; main_o = {}
     for (dq, do), L in sorted(link.items(), key=lambda kv: -len(kv[1])):   # ひもづいた行が多い組から
@@ -264,8 +281,8 @@ def build(quotes, orders):
             res = row_result(ctx, q, o, qr, pr, kind, extra)
             if amb.get((do, pi)):   # 同じ根拠で、ほかの見積にも、ひもづく → 黙って決めない
                 res["status"] = "REVIEW"
-                res["msg"] = f"同じ型番・同じ内容の見積が、ほかにもある(「{'」「'.join(amb[(do, pi)])}」)。どの見積の発注か、決められない。" + res["msg"]
-            if sp: res["msg"] = ("発注が、" + str(len(sp) + 1) + "枚に分かれている(合計で比べた)。" + res["msg"]).strip(); res["status"] = res["status"] if res["status"] != "OK" else "REVIEW"
+                res["msg"] = tr(f"同じ型番・同じ内容の見積が、ほかにもある(「{'」「'.join(amb[(do, pi)])}」)。どの見積の発注か、決められない。", qq) + " " + res["msg"]
+            if sp: res["msg"] = (tr("発注が、" + str(len(sp) + 1) + "枚に分かれている(合計で比べた)。", qq) + res["msg"]).strip(); res["status"] = res["status"] if res["status"] != "OK" else "REVIEW"
             pairs[(dq, do)]["results"].append(res)
     # 発注書の、見積に無い行
     for o in orders:
@@ -274,7 +291,7 @@ def build(quotes, orders):
             if (id(o), pi) in pline: continue
             label = (pr.get("model_raw") or pr.get("name") or "(型番なし)")[:22]
             ocr = o.src == "ocr"
-            res = {"status": "REVIEW" if (ocr or pr.get("problems")) else "DIFF", "model": label, "msg": "発注書にだけある品目(見積に無い)。" + ("画像の読み取りが確実でないので、断定しない" if ocr else "新しく加わった品目か、別の見積の品目か、確認してください"), "qrow": None, "orow": pr}
+            res = {"status": "REVIEW" if (ocr or pr.get("problems")) else "DIFF", "model": label, "msg": tr("発注書にだけある品目(見積に無い)。", qq) + ("画像の読み取りが確実でないので、断定しない" if ocr else ("客先に出した見積に無い品目です。仕入先の見積に余分な品目が入っていないか、確認してください" if qq else "新しく加わった品目か、別の見積の品目か、確認してください")), "qrow": None, "orow": pr}
             if po: pairs[(po, id(o))]["results"].append(res)
     # 見積の、発注されなかった行(その見積に、1行でも、ひもづいた発注があるときだけ)
     for q in quotes:
@@ -283,20 +300,23 @@ def build(quotes, orders):
         for qi, qr in enumerate(q.rows):
             if (id(q), qi) in qline or (id(q), qi) in split: continue
             label = (qr.get("model_raw") or qr.get("name") or "(型番なし)")[:22]
-            pairs[(id(q), mo)]["results"].append({"status": "NOORDER", "model": label, "msg": "見積にあるが、発注書に無い品目(個数減・見送りの可能性。発注されなかった品目です)", "qrow": qr, "orow": None})
+            if qq: pairs[(id(q), mo)]["results"].append({"status": "REVIEW" if q.src == "ocr" else "DIFF", "model": label, "msg": "客先見積にだけある品目(仕入先見積に無い)。仕入先に、頼む(見積をもらう)必要がある品目か、確認してください" + ("(画像の読み取りが確実でないので、断定しない)" if q.src == "ocr" else ""), "qrow": qr, "orow": None})
+            else: pairs[(id(q), mo)]["results"].append({"status": "NOORDER", "model": label, "msg": "見積にあるが、発注書に無い品目(個数減・見送りの可能性。発注されなかった品目です)", "qrow": qr, "orow": None})
     out = []
     for (dq, do), pdt in pairs.items():
         q, o = pdt["q"], pdt["o"]
         n = len(link[(dq, do)])
         others_q = [byid[x[1]].name for x in link if x[0] == dq and x[1] != do]
         others_o = [byid[x[0]].name for x in link if x[1] == do and x[0] != dq]
-        why = f"{n}行が、ひもづいた。根拠: " + (" / ".join(pdt["ev"]) if pdt["ev"] else "型番が一致")
-        if others_o: why += f"。★この発注書は、ほかの見積(「{'」「'.join(others_o)}」)の品目も、含んでいる"
-        if others_q: why += f"。★この見積は、ほかの発注書(「{'」「'.join(others_q)}」)にも、分かれている"
-        out.append((q, o, why, pdt["results"], ["型式", "品名", "個数"], ["単価", "金額"]))
+        why = f"{n}行が、ひもづいた。根拠: " + (" / ".join(pdt["ev"]) if pdt["ev"] else "型番が一致") if n else "1枚ずつなので、そのまま組にした(型番が重なる行は、見つかりませんでした)"
+        if others_o: why += tr(f"。★この発注書は、ほかの見積(「{'」「'.join(others_o)}」)の品目も、含んでいる", qq)
+        if others_q: why += tr(f"。★この見積は、ほかの発注書(「{'」「'.join(others_q)}」)にも、分かれている", qq)
+        out.append((q, o, why, pdt["results"], ["型式", "品名"] if qq else ["型式", "品名", "個数"], ["単価", "金額", "個数(違っても、違いにしない。参考として添える)"] if qq else ["単価", "金額"]))
     paired_q = {k[0] for k in link}; paired_o = {k[1] for k in link}
     for o in orders:
-        if id(o) not in paired_o:
+        if id(o) not in paired_o and qq:
+            out.append((None, o, "相手が決まらない(型番が重なる行が、1つも無い)。対応する客先見積が、入っていない(または、入れる社の枠が違う)かもしれません", [], [], []))
+        elif id(o) not in paired_o:
             on = C.quote_no(o.text); rf = ctx.refs[id(o)]
             parts = ["相手が決まらない(ひもづく行が、1つも無い)"]
             if rf: parts.append(f"発注書に書かれた見積番号は {'、'.join(sorted(rf))}、入っている見積の番号は {C._nums(quotes)}")
@@ -305,7 +325,9 @@ def build(quotes, orders):
             parts.append("対応する見積が、入っていない(または、入れる社の枠が違う)かもしれません")
             out.append((None, o, "。".join(parts), [], [], []))
     for q in quotes:
-        if id(q) not in paired_q:
+        if id(q) not in paired_q and qq:
+            out.append((q, None, "対応する仕入先見積がない(型番が重なる行が、1つも無い)", [], [], []))
+        elif id(q) not in paired_q:
             refs = sorted({x for o in orders for x in ctx.refs[id(o)]})
             out.append((q, None, "対応する発注書がない" + (f"(入っている発注書が書いている見積番号: {'、'.join(refs)}。この見積の番号: {ctx.qno[id(q)] or '読み取れなかった'})" if refs else ""), [], [], []))
     return out

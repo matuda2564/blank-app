@@ -1279,7 +1279,7 @@ SKIPNOTE_QQ = "品名・数量・単価・金額・合計・納期・単位(書�
 def doc_info(d, mode="qo"):
     """画面に出す『ツールが、この書類から、何を読んだか』(判断の基準が、見えるように)"""
     if d is None: return None
-    if mode == "qq":
+    if mode == "qq" and not getattr(d, "rows", None):
         tk = doc_tokens(d)
         return {"name": d.name, "kind": d.kind, "notes": d.notes[:6], "mode": "qq", "nlines": len(d.lines), "region": item_region(d.lines)[1] if d.src != "excel" else "Excelは全セルから拾った",
                 "rows": [{"m": v["raw"], "n": v["line"]["text"][:90], "q": None, "sure": v["sure"], "noise": bool(v.get("noise"))} for v in list(tk.values())[:300]]}
@@ -1321,17 +1321,21 @@ def run_vendor(vdir, workers=4, progress=None, name=None, mode="qo", with_qty=Fa
                 out["warnings"].append(f"{d.role}フォルダの「{d.name}」は、中身が「{k}」と読める。入れる場所を間違えていないか確認してください" + ("(見積同士を比べるときは、上の「見積 ⇔ 見積」のタブを使います)" if k == "見積" and d.role == "発注" else ""))
         elif k == "発注":
             out["warnings"].append(f"{d.role}フォルダの「{d.name}」は、中身が「発注書」と読める。見積書を入れる場所です。間違えていないか確認してください")
-        if mode == "qo":
-            try: apply_item_rows(d)
-            except Exception as e: log(f"apply_item_rows失敗 {d.name}: {e!r}")
+        try: apply_item_rows(d)   # 見積⇔発注も、見積⇔見積も、表の列の位置から、型式・品名・個数を読む
+        except Exception as e: log(f"apply_item_rows失敗 {d.name}: {e!r}")
         docs[d.role].append(d)
     out["seconds"] = sum(d.seconds for r in docs.values() for d in r)
     A, B = docs[roles[0]], docs[roles[1]]
-    if mode == "qo":
+    if mode in ("qo", "qq"):
         try:
             import qo_engine
-            for q, o, why, results, compared, skipped in qo_engine.build(A, B):
-                out["pairs"].append({"q": q, "o": o, "why": why, "results": results, "compared": compared, "skipped": skipped, "mode": "qo"})
+            for q, o, why, results, compared, skipped in qo_engine.build(A, B, mode):
+                if mode == "qq" and q and o and not (getattr(q, "rows", None) and getattr(o, "rows", None)):   # 表から行を読めなかった書類は、従来の『型番を拾って比べる』方法に戻す(黙って空にしない)
+                    results, compared, skipped = compare_qq(q, o, with_qty)
+                    out["pairs"].append({"q": q, "o": o, "why": why + "(表から行を読めなかったので、書類全体から型番を拾って比べた)", "results": results, "compared": compared, "skipped": skipped, "mode": "qq", "skipnote": SKIPNOTE_QQ})
+                    continue
+                out["pairs"].append({"q": q, "o": o, "why": why, "results": results, "compared": compared, "skipped": skipped, "mode": mode,
+                                     "skipnote": ("個数・単価・金額(客先と仕入先で、違って当たり前なので、違いにはしません。個数が違うときは、参考として添えます)" if mode == "qq" else "単価・金額(見積と発注書で、違って当たり前なので、比べません)") if q and o else None})
             return out
         except Exception:
             log("新しい照合エンジンが失敗。従来の照合に切り替える: " + traceback.format_exc())
