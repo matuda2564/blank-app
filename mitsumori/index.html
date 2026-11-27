@@ -21,6 +21,7 @@ button.big{font:inherit;font-size:18px;font-weight:700;padding:12px 28px;border-
 button.go{background:var(--pri);color:#fff}button.go:disabled{background:#9aa7b6;cursor:default}
 button.rst{background:#fff;color:var(--ng);border:2px solid var(--ng)}button.sv{background:#fff;color:var(--pri);border:2px solid var(--pri);font-size:15px;padding:8px 16px}
 .prog{flex:1;min-width:200px}.prog .t{height:12px;background:#dfe5ee;border-radius:6px;overflow:hidden}.prog .t i{display:block;height:100%;background:var(--img);width:0}
+.th{width:96px;border:1px solid #bcc6d4;border-radius:4px;cursor:zoom-in;display:block;background:#fff}.th:hover{box-shadow:0 0 0 2px #2f6fd6}.thr{display:flex;gap:8px;margin:4px 0}.fst .th{height:130px;object-fit:cover;object-position:top}.thr .th{width:120px}
 .fbar{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0}.fb{padding:6px 14px;border-radius:8px;border:2px solid #bcc6d4;background:#fff;font-size:15px;cursor:pointer}.fb.on{border-color:#1f3a6b;box-shadow:0 0 0 2px #1f3a6b33;font-weight:700}.fb.c-ng{background:var(--ngbg)}.fb.c-rv{background:var(--rvbg)}.fb.c-ok{background:var(--okbg)}.fb.c-np{background:#e6e8ec}.fst{border-collapse:collapse;width:100%;font-size:13px}.fst th,.fst td{border:1px solid #d9dfe6;padding:4px 8px;text-align:left;vertical-align:top}.fst th{background:#f1f3f6}
 .fsbox{border:1px solid #bcc6d4;border-radius:10px;padding:10px 12px;margin:10px 0;background:#fff}.fshd{margin-bottom:6px}.fs{margin:6px 0}.fs summary{cursor:pointer;font-size:15px}.fs table{border-collapse:collapse;width:100%;font-size:13px;margin-top:4px}.fs th,.fs td{border:1px solid #d9dfe6;padding:4px 8px;text-align:left;vertical-align:top}.fs th{background:#f1f3f6}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.chip{padding:6px 12px;border-radius:8px;font-size:15px}
@@ -159,7 +160,7 @@ async function showResult(){
   v.warnings.forEach(w=>h+=`<div class="warn">⚠ ${esc(w)}</div>`);
   if(MODE==='qo'&&v.slot&&v.warnings.some(w=>w.includes('中身が「見積」と読める')))h+=`<div class="warn"><button class="sm pri" onclick="moveToQQ(${v.slot})">この社の書類を「見積 ⇔ 見積」のタブへ移す</button> <small>(「見積書」の枠 → 客先に出した見積 / 「発注書」の枠 → 仕入先の見積 に、なります。逆なら、移したあとで、入れ替えてください)</small></div>`;
   for(const p of v.pairs){
-   h+=`<div class="pair" id="${p._id}" data-v="${p._v}"><div class="tt">${ROLES[0]}「${esc(p.q||'(なし)')}」 ⇔ ${ROLES[1]}「${esc(p.o||'(なし)')}」 <span class="meta">(${esc(p.why)})</span></div>`;
+   h+=`<div class="pair" id="${p._id}" data-v="${p._v}"><div class="tt">${ROLES[0]}「${esc(p.q||'(なし)')}」 ⇔ ${ROLES[1]}「${esc(p.o||'(なし)')}」 <span class="meta">(${esc(p.why)})</span></div><div class="thr">${thumb(p.qpage0,p._id)}${thumb(p.opage0,p._id)}</div>`;
    if(!(p.q&&p.o)){h+=`<div class="row REVIEW">⚠ 組みにならなかった書類です。人が確認してください。<br><small>理由: ${esc(p.why)}</small></div>${readPanel(p)}</div>`;continue}
    if(p.refcheck)h+=`<div class="ck ${p.refcheck.st}">見積番号の突き合わせ: ${p.refcheck.st==='ok'?'○':(p.refcheck.st==='ng'?'✕ ':'ー ')}${esc(p.refcheck.detail)}</div>`;
    h+=`<div class="meta">比べた項目: ${esc(p.compared.join('・'))}${p.skipnote?` / 比べない項目: ${esc(p.skipnote)}`:(p.skipped.length?` / 比べなかった項目(片方の書類に無い): ${esc(p.skipped.join('・'))}`:'')}</div>`;
@@ -178,16 +179,25 @@ async function showResult(){
 function readPanel(p){
  const one=(lab,d)=>d?`<div><b>${esc(lab)}「${esc(d.name)}」</b> <small>(${esc(d.kind||'種類不明')}・${d.mode==='qq'?d.rows.length+'個の型番を発見':d.rows.length+'行を読み取り'})</small>${d.region?`<div class="meta">読んだ範囲: ${esc(d.region)}</div>`:''}${d.mode==='qq'?(d.rows.length?`<table class="rd"><tr><th>見つけた型番</th><th>その行の文字</th><th>確実?</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.m)}</td><td>${esc(r.n||'')}</td><td>${r.sure?'○':(r.noise?'ゴミの疑い(無視)':'要確認')}</td></tr>`).join('')}</table>`:`<div class="warn">型番らしい文字列を、1つも見つけられませんでした(読み取った行: ${d.nlines}行)</div>`):(d.rows.length?`<table class="rd"><tr><th>型式(読んだまま)</th><th>品名</th><th>数量</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.m)}</td><td>${esc(r.n||'')}</td><td>${esc(r.q==null?'':r.q)}</td></tr>`).join('')}</table>`:'<div class="warn">明細の行を、1行も読めませんでした</div>')}${d.notes.length?`<div class="meta">注意: ${esc(d.notes.join(' / '))}</div>`:''}</div>`:'';
  return `<details class="rdp"><summary>読み取った中身を見る(ツールが、書類から、何を読んだか)</summary><div class="two">${one(ROLES[0],p.qread)}${one(ROLES[1],p.oread)}</div></details>`}
+function thumb(pid,anchor){return pid&&PAGES[pid]?`<img class="th" src="${PAGES[pid]}" title="押すと、見積と発注書を、並べて拡大します" onclick="openPairView('${anchor}')">`:'<small>(画像なし)</small>'}
+function openPairView(id){
+ const p=(window.PAIRMAP||{})[id];if(!p)return;
+ $('vw').hidden=false;$('vcnt').textContent='';$('vtitle').textContent=`${p._vendor} ・ ${ROLES[0]}「${p.q||'(なし)'}」⇔${ROLES[1]}「${p.o||'(なし)'}」`;
+ $('vmsg').innerHTML=`<b>${VL[p._v]}</b> — ${esc(p.why)}`;
+ $('vql').textContent=ROLES[0]+'(ホイール=拡大縮小 / 引っぱる=移動)';$('vol').textContent=ROLES[1]+'(ホイール=拡大縮小 / 引っぱる=移動)';
+ pane($('vq'),p.qpage0,null,null,'OK',false);pane($('vo'),p.opage0,null,null,'OK',false);
+ CUR=-1;$('vprev').disabled=true;$('vnext').disabled=true;$('vchk').checked=false;$('vok').style.display='none';$('vchk').parentElement.style.display='none';
+}
 function verdictOf(c,nopair){return nopair?'NP':c.DIFF?'DIFF':(c.REVIEW||c.NOORDER||c.OK_IMG)?'REV':'OK'}
 const VL={DIFF:'❌ 違い',REV:'⚠ 要確認',NP:'相手なし',OK:'✅ 一致'};
 function fileSummary(R){
- const files=new Map();let n=0;
+ const files=new Map();let n=0;window.PAIRMAP={};
  const get=(v,role,name)=>{const k=v.vendor+'|'+role+'|'+name;if(!files.has(k))files.set(k,{vendor:v.vendor,role,name,c:{},partners:new Set(),anchor:null,nopair:false});return files.get(k)};
  for(const v of R)for(const p of v.pairs){
-  const id='pr'+(n++);p._id=id;const both=p.q&&p.o;
+  const id='pr'+(n++);p._id=id;p._vendor=v.vendor;window.PAIRMAP[id]=p;const both=p.q&&p.o;
   const pc={};for(const r of p.rows)pc[r.status]=(pc[r.status]||0)+1;p._v=verdictOf(pc,!both);
   for(const [role,name,other] of [[ROLES[0],p.q,p.o],[ROLES[1],p.o,p.q]]){
-   if(!name)continue;const f=get(v,role,name);f.anchor=f.anchor||id;
+   if(!name)continue;const f=get(v,role,name);f.anchor=f.anchor||id;f.pid=f.pid||(role===ROLES[0]?p.qpage0:p.opage0);
    if(!both){f.nopair=true;continue}
    f.partners.add(other);for(const r of p.rows)f.c[r.status]=(f.c[r.status]||0)+1}}
  const L=[];
@@ -202,7 +212,7 @@ function fileSummary(R){
  const btn=(k,label,cls)=>`<button class="fb ${cls}" data-f="${k}" onclick="fsFilter('${k}')">${label} <b>${k==='ALL'?L.length:cnt[k]}</b></button>`;
  return `<div class="fsbox"><div class="fshd"><b>📁 ファイル別の結果</b> <small>(ボタンで、「どれが合っていて・合っていなくて・要確認か」を、切り替えて見られます。下の詳細も、同じように絞り込みます)</small> <button class="sm" onclick="copyFS()">この一覧をコピー(Excelに貼れます)</button></div>
 <div class="fbar">${btn('ALL','すべて','')}${btn('DIFF','❌ 違い','c-ng')}${btn('REV','⚠ 要確認','c-rv')}${btn('OK','✅ 一致','c-ok')}${btn('NP','相手なし','c-np')}</div>
-<table class="fst"><tr><th>結果</th><th>社</th><th>種類</th><th>ファイル</th><th>相手のファイル</th><th>理由</th></tr>${L.map(f=>`<tr data-v="${f.v}"><td><b>${VL[f.v]}</b></td><td>${esc(f.vendor)}</td><td>${esc(f.role)}</td><td><a href="#${f.anchor}" onclick="document.getElementById('${f.anchor}').scrollIntoView({block:'start'});return false">${esc(f.name)}</a></td><td>${f.partners.size?[...f.partners].map(esc).join('<br>'):'<small>(なし)</small>'}</td><td>${f.tags.length?f.tags.join(' / '):(f.v==='OK'?'全行が一致':'')}</td></tr>`).join('')}</table></div>`}
+<table class="fst"><tr><th>結果</th><th>見た目(押すと拡大)</th><th>社</th><th>種類</th><th>ファイル</th><th>相手のファイル</th><th>理由</th></tr>${L.map(f=>`<tr data-v="${f.v}"><td><b>${VL[f.v]}</b></td><td>${thumb(f.pid,f.anchor)}</td><td>${esc(f.vendor)}</td><td>${esc(f.role)}</td><td><a href="#${f.anchor}" onclick="document.getElementById('${f.anchor}').scrollIntoView({block:'start'});return false">${esc(f.name)}</a></td><td>${f.partners.size?[...f.partners].map(esc).join('<br>'):'<small>(なし)</small>'}</td><td>${f.tags.length?f.tags.join(' / '):(f.v==='OK'?'全行が一致':'')}</td></tr>`).join('')}</table></div>`}
 function fsFilter(k){
  document.querySelectorAll('.fst tr[data-v]').forEach(tr=>tr.style.display=(k==='ALL'||tr.dataset.v===k)?'':'none');
  document.querySelectorAll('.pair[data-v]').forEach(d=>d.style.display=(k==='ALL'||d.dataset.v===k)?'':'none');
@@ -240,7 +250,7 @@ function zoomBoth(f){['vq','vo'].forEach(id=>{const el=$(id);if(el._zoomAt)el._z
 $('zin').onclick=()=>zoomBoth(1.25);$('zout').onclick=()=>zoomBoth(1/1.25);$('zfit').onclick=()=>['vq','vo'].forEach(id=>{const el=$(id);if(el._home)el._home()});
 const ckHtml=cs=>cs?cs.map(c=>`<span class="ck ${c[1]}" title="${esc(c[2]||'')}">${esc(c[0])} ${c[1]==='ok'?'○':(c[1]==='ng'?'✕':'ー')}${c[1]!=='ok'&&c[2]?'('+esc(c[2])+')':''}</span>`).join(''):'';
 function showV(i){
- if(i<0||i>=ITEMS.length)return;CUR=i;const it=ITEMS[i],r=it.row;
+ if(i<0||i>=ITEMS.length)return;CUR=i;$('vok').style.display='';$('vchk').parentElement.style.display='';const it=ITEMS[i],r=it.row;
  const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',NOORDER:'📋 発注されなかった品目',OK_IMG:'☑ 画像で一致'}[r.status];
  $('vcnt').textContent=`${i+1} / ${ITEMS.length}`;$('vtitle').textContent=`${it.vendor} ・ ${it.pair}`;
  $('vmsg').innerHTML=`<b>${mark} ${esc(r.model)}</b>${r.msg?' — '+esc(r.msg):''}<div>${ckHtml(r.checks)}</div>`;
@@ -253,7 +263,7 @@ $('vx').onclick=()=>{$('vw').hidden=true;const r=$('row'+CUR);if(r)r.scrollIntoV
 $('vprev').onclick=()=>showV(CUR-1);$('vnext').onclick=()=>showV(CUR+1);
 $('vchk').onchange=e=>setDone(CUR,e.target.checked);
 $('vok').onclick=()=>{setDone(CUR,true);const j=nextUndone(CUR);if(j<0){alert('確認が必要な行は、全部、確認しました');$('vw').hidden=true}else showV(j)};
-document.addEventListener('keydown',e=>{if($('vw').hidden)return;if(e.key==='ArrowRight')showV(CUR+1);else if(e.key==='ArrowLeft')showV(CUR-1);else if(e.key==='Enter'){e.preventDefault();$('vok').click()}else if(e.key==='Escape')$('vx').click()});
+document.addEventListener('keydown',e=>{if($('vw').hidden)return;if(CUR<0){if(e.key==='Escape')$('vx').click();return}if(e.key==='ArrowRight')showV(CUR+1);else if(e.key==='ArrowLeft')showV(CUR-1);else if(e.key==='Enter'){e.preventDefault();$('vok').click()}else if(e.key==='Escape')$('vx').click()});
 function todo(){const n=ITEMS.filter(x=>!x.done).length,e=$('todo');if(!e)return;
  e.innerHTML=ITEMS.length?`確認が必要な行: ${ITEMS.length}行のうち、未確認 ${n}行 <button class="sm pri" onclick="const j=nextUndone(-1);if(j>=0)openV(j)" ${n?'':'disabled'}>確認を始める(書類全体に枠・順番に)</button>`:'確認が必要な行はありません'}
 $('save').onclick=async()=>{const css=document.querySelector('style').textContent;const html=`<!doctype html><meta charset="utf-8"><title>照合結果</title><style>${css}</style><body><main>${$('out').innerHTML}</main>`;try{const r=await api('/api/savehtml',{method:'POST',body:new Blob([html],{type:'text/html'})});alert('デスクトップに保存しました:\n'+r.path)}catch(e){alert('保存できませんでした: '+e.message)}};
