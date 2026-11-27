@@ -34,3 +34,19 @@ ob2 = doc("発注", "ob2.pdf", [("KQ2H06-M5", "継手", 3, 380)])
 out = E.build([q], [oa, ob2]); res = [r for _, _, _, rs, _, _ in out for r in rs]
 assert any(r["status"] == "DIFF" and "数量" in r["msg"] for r in res), res
 print("qo_engine_unit OK")
+
+# --- 単価・金額は、違って当たり前(比べない)。品名が、まるで違うと、型番が同じでも、要確認
+def doc2(role, name, rows):
+    d = C.Doc("/x/" + name, role); d.src = "text"; d.kind = "文字入りPDF"; d.text = ""; d.lines = []; d.lines2 = []
+    d.rows = [dict({"model_raw": m, "model": C.norm(m), "name": n, "problems": [], "soft": [], "exact": True, "src": "text", "left": f"{n} {m}", "unit": None, "due": None}, qty=q, price=p, amount=q * p) for m, n, q, p in rows]
+    return d
+qa = doc2("見積", "qa.pdf", [("AW20-02BE-D", "レギュレータ", 2, 4200)]); pa_ = doc2("発注", "pa.pdf", [("AW20-02BE-D", "レギュレータ", 2, 3000)])
+res = [r for _, _, _, rs, _, _ in E.build([qa], [pa_]) for r in rs]
+assert [r["status"] for r in res] == ["OK"], res          # 単価が違っても、OK
+pb = doc2("発注", "pb.pdf", [("AW20-02BE-D", "ケーブルクランプ金具", 2, 4200)])
+res = [r for _, _, _, rs, _, _ in E.build([qa], [pb]) for r in rs]
+assert res and res[0]["status"] == "REVIEW" and "品名" in res[0]["msg"], res   # 品名が、まるで違う
+pc = doc2("発注", "pc.pdf", [("AW20-02BE-D", "レギュレータ", 5, 4200)])
+res = [r for _, _, _, rs, _, _ in E.build([qa], [pc]) for r in rs]
+assert res and res[0]["status"] == "DIFF" and "数量" in res[0]["msg"] and "金額" not in res[0]["msg"], res   # 数量の違いだけを、知らせる
+print("qo_engine_price_name OK")
