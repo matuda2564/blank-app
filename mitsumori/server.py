@@ -111,13 +111,15 @@ def clean_old_runs():
 def serialize(vendors):
     """結果を画面用にまとめる。根拠の画像は、要確認・違い・画像一致の行だけ付ける(軽くするため)。
     書類全体の画像(確認ビュー用)は、ページごとに1回だけ入れて、行からは番号で参照する"""
-    out, pages, pid = [], {}, {}
+    out, pages, pid, words = [], {}, {}, {}
 
     def page_id(doc, pno):
         k = (doc.path, pno)
         if k not in pid:
             pid[k] = f"p{len(pid)}"
-            try: pages[pid[k]] = "data:image/jpeg;base64," + C.page_jpeg_b64(doc, pno)
+            try:
+                pages[pid[k]] = "data:image/jpeg;base64," + C.page_jpeg_b64(doc, pno)
+                words[pid[k]] = {"ocr": doc.src == "ocr", "w": C.page_words(doc, pno)}   # 範囲を指定してコピーするための、単語と位置
             except Exception: pages[pid[k]] = None
         return pid[k] if pages.get(pid[k]) else None
 
@@ -164,7 +166,7 @@ def serialize(vendors):
                 sp["rows"].append(row)
             sv["pairs"].append(sp)
         out.append(sv)
-    return {"vendors": out, "pages": pages}
+    return {"vendors": out, "pages": pages, "words": words}
 
 
 def run_job(mode="qo", with_qty=False, gen=0, ev=None):
