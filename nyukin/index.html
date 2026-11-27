@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>入金確認</title>
+<style>
+:root{--bg:#f5f7fa;--card:#fff;--line:#d5dbe3;--txt:#1d2733;--sub:#5d6b7c;--pri:#1f6feb;--ok:#1a7f4b;--ng:#c62828;--rv:#b26a00}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.6 "Meiryo UI","メイリオ",system-ui,sans-serif}
+header{background:#fff;border-bottom:1px solid var(--line);padding:10px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}header h1{font-size:18px;margin:0}.sp{flex:1}
+main{max-width:1100px;margin:0 auto;padding:14px 18px 60px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0}.card h2{font-size:15px;margin:0 0 8px}
+button{font:inherit;padding:6px 14px;border:1px solid var(--line);background:#fff;border-radius:7px;cursor:pointer}button:hover{background:#eef3fb}button.pri{background:var(--pri);color:#fff;border-color:var(--pri)}button.pri:hover{filter:brightness(.95)}button:disabled{opacity:.45;cursor:default}button.sm{padding:2px 9px;font-size:13px}button.danger{color:var(--ng);border-color:#e6b4b4}
+.dz{border:2px dashed #9fb0c6;border-radius:10px;padding:18px;text-align:center;color:var(--sub);cursor:pointer;background:#fbfcfe}.dz.over{background:#eaf2ff;border-color:var(--pri)}
+.files div{display:flex;gap:8px;align-items:center;padding:2px 0}.files span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar{height:10px;background:#e3e8ef;border-radius:6px;overflow:hidden;margin:8px 0}.bar i{display:block;height:100%;background:var(--pri);width:0}
+.chip{display:inline-block;padding:2px 10px;border-radius:12px;font-size:13px;margin:2px 4px 2px 0;border:1px solid var(--line);background:#fff}.chip.ok{color:var(--ok);border-color:#a8d9bd;background:#effaf3}.chip.ng{color:var(--ng);border-color:#f0b9b9;background:#fff3f3}.chip.rv{color:var(--rv);border-color:#f1d19b;background:#fff8ea}
+.warn{background:#fff8ea;border:1px solid #f1d19b;color:#6b4300;border-radius:8px;padding:6px 10px;margin:6px 0;font-size:14px}.err{background:#fff3f3;border:1px solid #f0b9b9;color:#8c1d1d;border-radius:8px;padding:6px 10px;margin:6px 0}
+.sr{display:flex;gap:8px;flex-wrap:wrap}.sr input{flex:1;min-width:240px;font:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:16px}
+table{border-collapse:collapse;width:100%;font-size:14px}th,td{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left}th{background:#f0f3f8;position:sticky;top:0}td.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.ng td{background:#fff3f3}.tot{display:flex;gap:22px;flex-wrap:wrap;margin:8px 0;font-size:16px}.tot b{font-size:20px}
+.grp label{display:flex;gap:8px;align-items:flex-start;padding:3px 0;cursor:pointer}.grp small{color:var(--sub)}
+.vw{position:fixed;inset:0;background:#0008;z-index:50;display:flex;align-items:center;justify-content:center}.vw[hidden]{display:none}.vb{background:#fff;border-radius:10px;padding:10px;max-width:96vw;max-height:94vh;overflow:auto}
+#toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#1f6f43;color:#fff;padding:10px 18px;border-radius:8px;display:none;z-index:99}
+.small{color:var(--sub);font-size:13px}
+</style></head><body>
+<header><h1>入金確認 <small class="small" id="ver"></small></h1><span class="sp"></span><span id="loaded" class="small"></span>
+<button class="danger" id="reset" title="読み込んだPDFと、読み取った中身を、全部消します">データを消して、次の月へ</button></header>
+<main>
+<div class="card" id="c1"><h2>① 銀行の入出金リスト(PDF)を入れて、「読み込む」</h2>
+<div class="dz" id="dz">ここにPDFをドラッグ、またはクリックして選ぶ(3店舗ぶんを、まとめて入れても構いません)</div>
+<div class="files" id="files"></div>
+<div style="margin-top:8px"><button class="pri" id="load">読み込む(文字を取り出して、データにする)</button> <button id="cancel" hidden>中止</button> <span class="small" id="pmsg"></span></div>
+<div class="bar" id="pbar" hidden><i id="pfill"></i></div>
+<div id="status"></div></div>
+<div class="card" id="c2"><h2>② お客さんの名前で探す</h2>
+<div class="sr"><input id="q" placeholder="名前を入れて Enter(例: キョウセラ)" autocomplete="off"><button class="pri" id="go">探す</button></div>
+<div class="small" style="margin-top:4px">銀行の名義は、<b>カタカナ</b>のことが多いです(漢字では見つからないことがあります)。全角・半角、ひらがな・カタカナ、「(カ」「カ)」「株式会社」の違いは、そろえて探します。複数の名前は、空白で区切ると、どれかに当たれば出ます。</div>
+<div id="res"></div></div>
+</main>
+<div class="vw" id="vw" hidden><div class="vb"><div style="display:flex;gap:10px;align-items:center;margin-bottom:6px"><b id="vt"></b><span class="sp"></span><button id="vx">✕ 閉じる</button></div><img id="vi" style="max-width:90vw"></div></div>
+<div id="toast"></div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const TK=new URLSearchParams(location.search).get('t')||'';
+async function api(p,o){o=Object.assign({},o);o.headers=Object.assign({'X-NK-Token':TK},o.headers||{});const r=await fetch(p,o);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j}
+function toast(m){const d=$('toast');d.textContent=m;d.style.display='block';clearTimeout(d._t);d._t=setTimeout(()=>d.style.display='none',2600)}
+async function copyTxt(t,msg){try{await navigator.clipboard.writeText(t);toast(msg||'コピーしました')}catch(e){const a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();try{if(!document.execCommand('copy'))throw 0;toast(msg||'コピーしました')}catch(_){prompt('自動でコピーできませんでした。下を選んでコピーしてください',t)}a.remove()}}
+const yen=n=>n==null?'':Number(n).toLocaleString('ja-JP');
+let ST=null,RES=null;
+async function refresh(){try{ST=await api('/api/state');render()}catch(e){}}
+function render(){
+ $('ver').textContent=ST.version;const run=ST.job.status==='running';
+ $('files').innerHTML=ST.files.map(f=>`<div><span>📄 ${esc(f)}</span><button class="sm" ${run?'disabled':''} onclick="rm(decodeURIComponent('${encodeURIComponent(f)}'))">✕ 外す</button></div>`).join('');
+ $('load').disabled=run||!ST.files.length;$('cancel').hidden=!run;$('pbar').hidden=!run;
+ if(run){const p=ST.job.total?Math.round(100*ST.job.done/ST.job.total):0;$('pfill').style.width=p+'%';$('pmsg').textContent=(ST.job.msg||'読み込み中…')+`(${p}%・${ST.job.sec}秒)`}else $('pmsg').textContent='';
+ const docs=ST.docs;let h='';
+ for(const d of docs){
+  const b=d.balance;
+  h+=`<div style="margin:6px 0"><b>${esc(d.name)}</b> <span class="small">${d.pages}ページ・<b>${d.rows}行</b>を読み取り${d.range[0]?`・${d.range[0]} 〜 ${d.range[1]}`:''}</span><br>`;
+  if(b)h+=`<span class="chip ${b.ng?'ng':'ok'}">残高の検算: ${b.ok}行が一致${b.ng?` / <b>${b.ng}行が合わない</b>`:''}</span>`;
+  else h+='<span class="chip rv">残高の検算: できませんでした(残高の列が読めない)</span>';
+  if(d.text_pages<d.pages)h+=`<span class="chip ng">文字が取れなかったページ: ${d.pages-d.text_pages}</span>`;
+  const bad=d.page_stats.filter(s=>s.note||(s.words&&!s.rows));
+  if(bad.length)h+=`<div class="warn">行を読み取れなかったページ: ${bad.map(s=>s.page+'ページ'+(s.note?'('+esc(s.note)+')':'')).join('、')}。このページは、人が確認してください。</div>`;
+  d.notes.forEach(n=>h+=`<div class="warn">${esc(n)}</div>`);
+  h+='</div>';
+ }
+ $('status').innerHTML=h;
+ const ready=ST.total_rows>0&&!run;$('q').disabled=!ready;$('go').disabled=!ready;
+ $('loaded').textContent=docs.length?`いま読み込んでいるのは: ${docs.map(d=>d.name).join('、')}(${ST.total_rows}行)`:'読み込んだデータは、ありません';
+}
+async function up(files){
+ for(const f of files){
+  try{await api('/api/upload?name='+encodeURIComponent(f.name),{method:'POST',body:f})}catch(e){toast('入れられませんでした: '+e.message)}
+ }refresh();
+}
+$('dz').onclick=()=>{const i=document.createElement('input');i.type='file';i.multiple=true;i.accept='.pdf';i.style.display='none';document.body.appendChild(i);i.onchange=()=>{up([...i.files]).then(()=>i.remove())};i.click()};
+$('dz').ondragover=e=>{e.preventDefault();$('dz').classList.add('over')};$('dz').ondragleave=()=>$('dz').classList.remove('over');
+$('dz').ondrop=e=>{e.preventDefault();$('dz').classList.remove('over');up([...e.dataTransfer.files])};
+async function rm(n){await api('/api/remove?name='+encodeURIComponent(n),{method:'POST'});RES=null;$('res').innerHTML='';refresh()}
+$('load').onclick=async()=>{try{await api('/api/load',{method:'POST'});RES=null;$('res').innerHTML='';poll()}catch(e){toast(e.message)}};
+$('cancel').onclick=async()=>{await api('/api/cancel',{method:'POST'});refresh()};
+async function poll(){for(;;){await refresh();if(ST.job.status!=='running')break;await new Promise(r=>setTimeout(r,600))}}
+$('reset').onclick=async()=>{if(!confirm('読み込んだPDFと、読み取った中身を、全部消します(次の月の準備です)。よろしいですか?'))return;await api('/api/reset',{method:'POST'});RES=null;$('res').innerHTML='';$('q').value='';refresh();toast('消しました。次の月のPDFを入れてください')};
+$('go').onclick=search;$('q').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();search()}};
+async function search(){const q=$('q').value.trim();if(!q)return;try{RES=await api('/api/search?q='+encodeURIComponent(q));RES.sel=new Set(RES.groups.map(g=>g.id));showRes()}catch(e){toast(e.message)}}
+function pick(){return RES.rows.filter(r=>RES.sel.has(r.g))}
+function showRes(){
+ if(!RES.groups.length){$('res').innerHTML='<div class="warn">「'+esc(RES.query)+'」に当たる名義は、見つかりませんでした。カタカナ(例: キョウセラ)で探してみてください。</div>';return}
+ let h='<h3 style="margin:12px 0 4px;font-size:14px">見つかった名義(チェックを外すと、合計から外れます)</h3><div class="grp">';
+ for(const g of RES.groups)h+=`<label><input type="checkbox" ${RES.sel.has(g.id)?'checked':''} onchange="tg(${g.id},this.checked)"><span>${esc(g.name)} <small>${g.count}件・入金 ${yen(g.in)}円${g.out?`・出金 ${yen(g.out)}円`:''}${g.variants.length>1?`(ほかの書き方: ${g.variants.slice(1).map(esc).join(' / ')})`:''}</small></span></label>`;
+ h+='</div><div id="list"></div>';$('res').innerHTML=h;list()}
+function tg(id,on){on?RES.sel.add(id):RES.sel.delete(id);list()}
+function list(){
+ const R=pick();const tin=R.reduce((a,r)=>a+(r.in||0),0),tout=R.reduce((a,r)=>a+(r.out||0),0);const ng=R.filter(r=>r.chk==='ng').length;
+ let h=`<div class="tot"><span>件数 <b>${R.length}</b>件</span><span>入金の合計 <b>${yen(tin)}</b>円</span>${tout?`<span>出金の合計 <b>${yen(tout)}</b>円</span>`:''}</div>`;
+ if(ng)h+=`<div class="warn">残高が合わない行が ${ng}行 含まれています(赤い行)。読み取りが間違っているかもしれません。<b>元のページを見て、確認してください</b>。</div>`;
+ h+=`<div style="margin:6px 0"><button class="pri" onclick="cpList()">一覧をコピー(Excelに貼れます)</button> <button onclick="cpTot()">合計だけコピー</button></div>`;
+ h+='<table><tr><th>日付</th><th>名義</th><th>入金</th><th>出金</th><th>検算</th><th>元のページ</th></tr>';
+ R.forEach((r,i)=>{h+=`<tr class="${r.chk==='ng'?'ng':''}"><td>${r.date}</td><td>${esc(r.desc)}</td><td class="n">${yen(r.in)}</td><td class="n">${yen(r.out)}</td><td>${r.chk==='ok'?'○':r.chk==='ng'?'✕ 合わない':'−'}</td><td><button class="sm" onclick="showPage(${r.doc},${r.i},${r.page})">${r.page}ページを見る</button></td></tr>`});
+ $('list').innerHTML=h+'</table>'}
+function cpList(){const R=pick();const tin=R.reduce((a,r)=>a+(r.in||0),0),tout=R.reduce((a,r)=>a+(r.out||0),0);
+ const t=['日付\t名義\t入金\t出金'].concat(R.map(r=>[r.date,r.desc,r.in==null?'':r.in,r.out==null?'':r.out].join('\t'))).concat([`合計\t${R.length}件\t${tin}\t${tout}`]).join('\n');copyTxt(t,`${R.length}行と合計をコピーしました(Excelに貼れます)`)}
+function cpTot(){const R=pick();const tin=R.reduce((a,r)=>a+(r.in||0),0);copyTxt(String(tin),`合計 ${yen(tin)}円 をコピーしました`)}
+function showPage(doc,i,p){
+ const d=ST.docs[doc];const r=(RES.rows||[]).find(x=>x.doc===doc&&x.i===i);$('vt').textContent=`${d.name}・${p}ページ(赤い枠が、この行)`;
+ $('vi').src='/api/page?doc='+doc+'&p='+p+'&t='+encodeURIComponent(TK)+'&box='+encodeURIComponent(r&&r.box?r.box.join(','):'');$('vw').hidden=false}
+$('vx').onclick=()=>$('vw').hidden=true;$('vw').onclick=e=>{if(e.target===$('vw'))$('vw').hidden=true};
+refresh();setInterval(()=>{if(!ST||ST.job.status!=='running')refresh()},5000);
+</script></body></html>
