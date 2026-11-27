@@ -46,8 +46,12 @@ button.sm.pri{background:var(--pri);color:#fff}
 .pg{flex:1;overflow:hidden;border:1px solid #bcc6d4;border-radius:6px;background:#eef1f5;position:relative;cursor:grab;touch-action:none;user-select:none}.pg.drag{cursor:grabbing}
 .pgin{position:absolute;left:0;top:0;width:100%;transform-origin:0 0}.pgin img{width:100%;display:block;pointer-events:none;-webkit-user-drag:none}
 .pg .warn{position:absolute;left:6px;right:6px;top:6px;z-index:3}
-.bx{position:absolute;border:2px solid #e11d2e;border-radius:2px;box-shadow:0 0 5px rgba(225,29,46,.55);pointer-events:none}
-.bx.NOORDER{border-color:#6b7488;box-shadow:0 0 5px rgba(107,116,136,.55)}.bx.REVIEW{border-color:#e8820c;box-shadow:0 0 5px rgba(232,130,12,.6)}.bx.OK_IMG{border-color:#2f6fd6;box-shadow:0 0 5px rgba(47,111,214,.55)}
+.bx{--bc:#e11d2e;position:absolute;border:2px solid var(--bc);border-radius:2px;box-shadow:0 0 5px var(--bc);pointer-events:none;background:color-mix(in srgb,var(--bc) 10%,transparent)}
+.bx.OK{--bc:#1f9d55}.bx.DIFF{--bc:#e11d2e}.bx.REVIEW{--bc:#e8820c}.bx.OK_IMG{--bc:#2f6fd6}.bx.NOORDER{--bc:#6b7488}
+.bx[data-n]::after{content:attr(data-n);position:absolute;right:100%;top:50%;transform:translateY(-50%);margin-right:3px;padding:0 5px;border-radius:3px;font-size:12px;line-height:14px;color:#fff;background:var(--bc)}
+.lg{display:flex;flex-wrap:wrap;gap:6px 12px;margin:4px 0;font-size:13px}.lg i{display:inline-block;width:12px;height:12px;border:2px solid;border-radius:2px;vertical-align:-2px;margin-right:4px}
+.lg .OK i{border-color:#1f9d55;background:#1f9d5522}.lg .DIFF i{border-color:#e11d2e;background:#e11d2e22}.lg .REVIEW i{border-color:#e8820c;background:#e8820c22}.lg .OK_IMG i{border-color:#2f6fd6;background:#2f6fd622}.lg .NOORDER i{border-color:#6b7488;background:#6b748822}
+.rc{display:inline-block;margin:2px 4px 2px 0;padding:1px 8px;border-radius:10px;font-size:12px;color:#fff}.rc.OK{background:#1f9d55}.rc.DIFF{background:#e11d2e}.rc.REVIEW{background:#e8820c}.rc.OK_IMG{background:#2f6fd6}.rc.NOORDER{background:#6b7488}
 .ck{display:inline-block;margin:2px 4px 2px 0;padding:2px 8px;border-radius:12px;font-size:13px;border:1px solid #bcc6d4;background:#fff}.ck.ok{border-color:#2a9d5c;color:#17703f;background:#eefaf3}.ck.ng{border-color:#d33;color:#a11;background:#fff0f0;font-weight:700}.ck.na{color:#667385;background:#f4f6f9}
 .zoom{display:flex;align-items:center;gap:4px}.zoom button{min-width:34px}
 .vf{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:8px}.vf .sp{flex:1}
@@ -186,6 +190,15 @@ function openPairView(id){
  $('vmsg').innerHTML=`<b>${VL[p._v]}</b> — ${esc(p.why)}`;
  $('vql').textContent=ROLES[0]+'(ホイール=拡大縮小 / 引っぱる=移動)';$('vol').textContent=ROLES[1]+'(ホイール=拡大縮小 / 引っぱる=移動)';
  pane($('vq'),p.qpage0,null,null,'OK',false);pane($('vo'),p.opage0,null,null,'OK',false);
+ const LAB={OK:'一致',DIFF:'違い',REVIEW:'要確認',OK_IMG:'画像で一致',NOORDER:'発注されなかった'};
+ let chips='',num=0;
+ (p.rows||[]).forEach(r=>{num++;
+  for(const [side,el] of [['q',$('vq')],['o',$('vo')]]){const bx=r['m'+side+'box'];if(!bx||r['m'+side+'pno']!==0)continue;const w=el.querySelector('.pgin');if(!w)continue;
+   const b=document.createElement('i');b.className='bx '+r.status;b.dataset.n=num;b.title=`${num}. ${LAB[r.status]||r.status} ${r.model}${r.msg?' — '+r.msg:''}`;
+   b.style.left=(100*bx[0])+'%';b.style.top=(100*bx[1])+'%';b.style.width=(100*(bx[2]-bx[0]))+'%';b.style.height=(100*(bx[3]-bx[1]))+'%';w.appendChild(b)}
+  chips+=`<span class="rc ${r.status}" title="${esc(r.msg||'')}">${num} ${esc(r.model)} ${LAB[r.status]||''}</span>`});
+ $('vmsg').innerHTML+=`<div class="lg"><span class="OK"><i></i>一致</span><span class="DIFF"><i></i>違い</span><span class="REVIEW"><i></i>要確認</span><span class="OK_IMG"><i></i>画像で一致(目で確認)</span><span class="NOORDER"><i></i>相手に無い品目(発注されなかった等)</span><small>同じ番号の枠が、左右で、ひもづいた行です</small></div><div>${chips}</div>`;
+ for(const id2 of ['vq','vo']){const el=$(id2);if(el._home)el._home()}
  CUR=-1;$('vprev').disabled=true;$('vnext').disabled=true;$('vchk').checked=false;$('vok').style.display='none';$('vchk').parentElement.style.display='none';
 }
 function verdictOf(c,nopair){return nopair?'NP':c.DIFF?'DIFF':(c.REVIEW||c.NOORDER||c.OK_IMG)?'REV':'OK'}
@@ -234,7 +247,7 @@ function pane(el,pid,box,raw,status,nomatch){
  if(!(pid&&PAGES[pid])){const d=document.createElement('div');d.style.cssText='padding:10px;color:#667385';d.innerHTML=raw?`<div class="raw">${esc(raw)}<br><small>(この書類は画像が無いので、読み取った文字を出しています)</small></div>`:'(この書類に、対応する行はありません)';el.appendChild(d);return}
  const st=el._st,w=document.createElement('div');w.className='pgin';const im=document.createElement('img');im.src=PAGES[pid];w.appendChild(im);el.appendChild(w);
  let b=null;if(box){b=document.createElement('i');b.className='bx '+status;b.style.left=(100*box[0])+'%';b.style.top=(100*box[1])+'%';b.style.width=(100*(box[2]-box[0]))+'%';b.style.height=(100*(box[3]-box[1]))+'%';w.appendChild(b)}
- const apply=()=>{w.style.transform=`translate(${st.x}px,${st.y}px) scale(${st.z})`;if(b)b.style.borderWidth=Math.max(1,2/st.z)+'px';showZ()};
+ const apply=()=>{w.style.transform=`translate(${st.x}px,${st.y}px) scale(${st.z})`;w.querySelectorAll('.bx').forEach(x=>x.style.borderWidth=Math.max(1,2/st.z)+'px');showZ()};
  const home=()=>{st.z=1;st.x=0;st.y=0;if(box&&im.clientHeight)st.y=Math.min(0,el.clientHeight/3-box[1]*im.clientHeight);apply()};
  el._home=home;el._zoomAt=(mx,my,f)=>{const nz=Math.max(0.3,Math.min(10,st.z*f));st.x=mx-(mx-st.x)*(nz/st.z);st.y=my-(my-st.y)*(nz/st.z);st.z=nz;apply()};
  im.onload=home;if(im.complete)home();

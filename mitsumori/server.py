@@ -136,6 +136,10 @@ def serialize(vendors):
             for r in p["results"]:
                 sv["count"][r["status"]] += 1
                 row = {"status": r["status"], "model": r["model"], "msg": r["msg"], "checks": [list(c) for c in r["checks"]] if r.get("checks") else None}
+                for side, d, rr in (("q", q, r["qrow"]), ("o", o, r["orow"])):   # 全部の行に、書類上の位置(印をつけるため)
+                    if d and rr and not r.get("doc"):
+                        bx = C.row_box(d, rr)
+                        row["m" + side + "box"] = bx; row["m" + side + "pno"] = rr.get("page", 0) if bx else None
                 if r["status"] != "OK":
                     row["qimg"] = C.crop_b64(q, r["qrow"]) if q and r["qrow"] else None
                     row["oimg"] = C.crop_b64(o, r["orow"]) if o and r["orow"] else None
