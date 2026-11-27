@@ -61,7 +61,7 @@ button.sm.pri{background:var(--pri);color:#fff}
 .tabs button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px 8px 0 0;padding:9px 16px;font:inherit;font-size:14px;cursor:pointer}
 .tabs button.on{background:var(--pri);color:#fff;border-color:var(--pri);font-weight:700}
 .bn{margin:8px 20px 0;padding:10px 14px;border-radius:8px;font-size:14px;line-height:1.6}.bn.ng{background:var(--ngbg);color:#7a1f1f;border:1px solid var(--ng)}.bn.rv{background:var(--rvbg);color:#5c4300;border:1px solid var(--rv)}
-.pg.selmode{cursor:crosshair}.selbox{position:absolute;border:2px dashed #1f6f43;background:rgba(31,111,67,.18);pointer-events:none;z-index:6}#rsel.on{background:#1f6f43;color:#fff;border-color:#1f6f43}.cpc{cursor:copy}.cpc:hover{background:#e8f1ff}.rd{border-collapse:collapse;font-size:12px;margin:4px 0}.rd td,.rd th{border:1px solid var(--line);padding:2px 8px;text-align:left}.rdp{margin:6px 0;font-size:13px}.rdp summary{cursor:pointer;color:var(--pri)}
+.pg.selmode{cursor:crosshair}.pg.cpok{cursor:copy}.hov{position:absolute;background:rgba(31,111,67,.22);outline:1.5px solid #1f6f43;pointer-events:none;z-index:5}#cptip{position:fixed;display:none;background:#1f6f43;color:#fff;padding:4px 9px;border-radius:6px;font-size:12px;pointer-events:none;z-index:99998;box-shadow:0 1px 6px #0004}.selbox{position:absolute;border:2px dashed #1f6f43;background:rgba(31,111,67,.18);pointer-events:none;z-index:6}#rsel.on{background:#1f6f43;color:#fff;border-color:#1f6f43}.cpc{cursor:copy}.cpc:hover{background:#e8f1ff}.rd{border-collapse:collapse;font-size:12px;margin:4px 0}.rd td,.rd th{border:1px solid var(--line);padding:2px 8px;text-align:left}.rdp{margin:6px 0;font-size:13px}.rdp summary{cursor:pointer;color:var(--pri)}
 .opt{margin:8px 0;font-size:14px}.opt small{color:var(--sub)}
 @media print{header,.slots,.bar,.note,.tabs,.opt{display:none}}
 </style></head><body>
@@ -98,7 +98,7 @@ button.sm.pri{background:var(--pri);color:#fff}
 <div id="out"></div>
 </main>
 <div class="vw" id="vw" hidden><div class="vbox">
- <div class="vh"><b id="vcnt"></b><span id="vtitle"></span><span class="sp"></span><span class="zoom"><small>両方を:</small><button class="sm" id="zout" title="縮小">－</button><button class="sm" id="zfit" title="元の大きさ・位置に戻す">元に戻す</button><button class="sm" id="zin" title="拡大">＋</button></span><button class="sm" id="rsel" title="押すと、画像の上を、なぞった範囲の文字を、コピーできます(Shiftを押しながらなぞっても、同じです)">📋 範囲コピー: オフ</button><span class="kbd">画像: ホイール=拡大縮小 / 左クリックを押して引っぱる=移動(「範囲コピー」がオンのときや、Shiftを押しながらは、なぞった範囲をコピー) / ダブルクリック=元に戻す　キー: ← →=前後 / Enter=確認して次へ / Esc=閉じる</span><button class="sm" id="vx">✕ 閉じる</button></div>
+ <div class="vh"><b id="vcnt"></b><span id="vtitle"></span><span class="sp"></span><span class="zoom"><small>両方を:</small><button class="sm" id="zout" title="縮小">－</button><button class="sm" id="zfit" title="元の大きさ・位置に戻す">元に戻す</button><button class="sm" id="zin" title="拡大">＋</button></span><button class="sm" id="rsel" title="オン: 画像が動かず、なぞった範囲の文字をコピー。オフ: 画像は引っぱって動かせ、型式・品名・個数などの文字にカーソルを合わせて押すと、その文字だけコピー(Shiftを押しながらなぞっても、範囲コピー)">📋 範囲コピー: オフ(画像は動く。文字に合わせて押すとコピー)</button><span class="kbd">画像: ホイール=拡大縮小 / 左クリックを押して引っぱる=移動(「範囲コピー」がオンのときや、Shiftを押しながらは、なぞった範囲をコピー) / ダブルクリック=元に戻す　キー: ← →=前後 / Enter=確認して次へ / Esc=閉じる</span><button class="sm" id="vx">✕ 閉じる</button></div>
  <div id="vmsg"></div>
  <div class="vbody"><div class="pane"><small id="vql">見積(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)</small><div class="pg" id="vq"></div></div><div class="pane"><small id="vol">発注(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)</small><div class="pg" id="vo"></div></div></div>
  <div class="vf"><button id="vprev">◀ 前へ</button><label><input type="checkbox" id="vchk"> 確認した</label><span class="sp"></span><button class="go" id="vok">確認した → 次の未確認へ</button><button id="vnext">次へ ▶</button></div>
@@ -203,6 +203,7 @@ function openPairView(id){
    b.style.left=(100*bx[0])+'%';b.style.top=(100*bx[1])+'%';b.style.width=(100*(bx[2]-bx[0]))+'%';b.style.height=(100*(bx[3]-bx[1]))+'%';w.appendChild(b)}
   chips+=`<span class="rc ${r.status}" title="${esc(r.msg||'')}">${num} ${esc(r.model)} ${LAB[r.status]||''}</span>`});
  $('vmsg').innerHTML+=`<div class="lg"><span class="OK"><i></i>一致</span><span class="DIFF"><i></i>違い</span><span class="REVIEW"><i></i>要確認</span><span class="OK_IMG"><i></i>画像で一致(目で確認)</span><span class="NOORDER"><i></i>相手に無い品目(発注されなかった等)</span><small>同じ番号の枠が、左右で、ひもづいた行です</small></div><div>${chips}</div>`;
+ $('vq')._rows=(p.rows||[]).filter(r=>r.mqbox&&r.mqpno===0).map(r=>({box:r.mqbox,cp:r.cp}));$('vo')._rows=(p.rows||[]).filter(r=>r.mobox&&r.mopno===0).map(r=>({box:r.mobox,cp:r.cp}));
  for(const id2 of ['vq','vo']){const el=$(id2);if(el._home)el._home()}
  CUR=-1;$('vprev').disabled=true;$('vnext').disabled=true;$('vchk').checked=false;$('vok').style.display='none';$('vchk').parentElement.style.display='none';
 }
@@ -271,12 +272,37 @@ function pane(el,pid,box,raw,status,nomatch){
   if(RSEL||e.shiftKey){const [fx,fy]=frac(e);sel={fx,fy,box:document.createElement('i')};sel.box.className='selbox';w.appendChild(sel.box);el.setPointerCapture(e.pointerId);e.preventDefault();return}   // 範囲コピー: なぞった四角の中の文字を、コピーする
   drag={x:e.clientX,y:e.clientY,sx:st.x,sy:st.y};el.setPointerCapture(e.pointerId);el.classList.add('drag')};   // 左クリックを押したまま引っ張ると、動かせる
  el.onpointermove=e=>{if(sel){const [fx,fy]=frac(e);const x0=Math.min(sel.fx,fx),y0=Math.min(sel.fy,fy),x1=Math.max(sel.fx,fx),y1=Math.max(sel.fy,fy);const s=sel.box.style;s.left=(100*x0)+'%';s.top=(100*y0)+'%';s.width=(100*(x1-x0))+'%';s.height=(100*(y1-y0))+'%';sel.r=[x0,y0,x1,y1];return}
-  if(!drag)return;st.x=drag.sx+(e.clientX-drag.x);st.y=drag.sy+(e.clientY-drag.y);apply()};
+  if(!drag){hoverCopy(el,w,e,frac(e));return}
+  if(Math.abs(e.clientX-drag.x)+Math.abs(e.clientY-drag.y)>4)drag.moved=true;hideTip(el);st.x=drag.sx+(e.clientX-drag.x);st.y=drag.sy+(e.clientY-drag.y);apply()};
+ el.onpointerleave=()=>hideTip(el);
  const end=e=>{if(sel){const r=sel.r;setTimeout(()=>{try{sel.box.remove()}catch(_){}},900);sel=null;if(r&&(r[2]-r[0])>0.004&&(r[3]-r[1])>0.002)copyRegion(el._pid,r);return}
+  if(drag&&!drag.moved&&e.type==='pointerup'&&el._hov){const hv=el._hov;clearTimeout(el._ct);el._ct=setTimeout(()=>copyTxt(hv.text,'コピーしました: '+hv.label+'「'+(hv.text.length>40?hv.text.slice(0,40)+'…':hv.text)+'」'+(hv.ocr?'(画像から読み取った文字です。貼る前に、目で確認してください)':'')),260)}   // 動かさずに押した=その文字をコピー(ダブルクリックで元に戻すときは、コピーしない)
   drag=null;el.classList.remove('drag')};el.onpointerup=end;el.onpointercancel=end;
- el.ondblclick=home;   // ダブルクリックで、元の位置・大きさに戻る
+ el.ondblclick=()=>{clearTimeout(el._ct);home()};   // ダブルクリックで、元の位置・大きさに戻る
 }
 function showZ(){}
+function hideTip(el){el._hov=null;const t=$('cptip');if(t)t.style.display='none';const v=el.querySelector('.hov');if(v)v.remove();el.classList.remove('cpok')}
+function hoverCopy(el,w,e,f){
+ if(RSEL||e.shiftKey){hideTip(el);return}
+ const W=(WORDS||{})[el._pid];if(!W||!W.w){hideTip(el);return}
+ const [fx,fy]=f;const tol=0.003;
+ const hit=W.w.find(t=>fx>=t[0]-tol&&fx<=t[2]+tol&&fy>=t[1]-tol&&fy<=t[3]+tol);
+ if(!hit){hideTip(el);return}
+ const nz=s=>String(s==null?'':s).replace(/\s/g,'').toUpperCase();
+ const row=(el._rows||[]).find(r=>r.box&&fx>=r.box[0]&&fx<=r.box[2]&&fy>=r.box[1]&&fy<=r.box[3]);
+ let kind='word',text=hit[4],label='この文字';const hw=nz(hit[4]);
+ if(row&&row.cp&&hw.length>=2){const c=row.cp;
+  if(c.model&&nz(c.model).includes(hw)){kind='model';text=c.model;label='型式'}
+  else if(c.name&&nz(c.name).includes(hw)){kind='name';text=c.name;label='品名'}
+  else if(c.qty!=null&&nz(c.qty)===hw){kind='qty';text=String(c.qty);label='個数'}}
+ else if(row&&row.cp&&row.cp.qty!=null&&nz(row.cp.qty)===hw){kind='qty';text=String(row.cp.qty);label='個数'}
+ el._hov={kind,text,label,ocr:!!W.ocr};
+ let v=el.querySelector('.hov');if(!v){v=document.createElement('i');v.className='hov';w.appendChild(v)}
+ v.style.left=(100*hit[0])+'%';v.style.top=(100*hit[1])+'%';v.style.width=(100*(hit[2]-hit[0]))+'%';v.style.height=(100*(hit[3]-hit[1]))+'%';
+ el.classList.add('cpok');
+ let t=$('cptip');if(!t){t=document.createElement('div');t.id='cptip';document.body.appendChild(t)}
+ t.textContent='📋 押すと、'+label+'をコピー: '+(text.length>30?text.slice(0,30)+'…':text);t.style.display='block';t.style.left=(e.clientX+14)+'px';t.style.top=(e.clientY+16)+'px'
+}
 function copyRegion(pid,r){
  const W=(WORDS||{})[pid];if(!W||!W.w||!W.w.length){toast('この書類は、文字の位置が取れていないので、範囲コピーできません(表の「1行コピー」を使ってください)');return}
  const hit=W.w.filter(t=>{const cx=(t[0]+t[2])/2,cy=(t[1]+t[3])/2;return cx>=r[0]&&cx<=r[2]&&cy>=r[1]&&cy<=r[3]});
@@ -287,7 +313,7 @@ function copyRegion(pid,r){
  const txt=lines.map(l=>l.t.sort((a,b)=>a[0]-b[0]).map(t=>t[4]).join(' ')).join('\n');
  copyTxt(txt,'コピーしました: '+(txt.length>40?txt.slice(0,40)+'…':txt).replace(/\n/g,' / ')+(W.ocr?'(画像から読み取った文字です。貼る前に、目で確認してください)':''))
 }
-function setRsel(on){RSEL=!!on;const b=$('rsel');if(b){b.classList.toggle('on',RSEL);b.textContent='📋 範囲コピー: '+(RSEL?'オン(なぞって選ぶ)':'オフ')}document.querySelectorAll('.pg').forEach(p=>p.classList.toggle('selmode',RSEL))}
+function setRsel(on){RSEL=!!on;const b=$('rsel');if(b){b.classList.toggle('on',RSEL);b.textContent='📋 範囲コピー: '+(RSEL?'オン(なぞって選ぶ。画像は動きません)':'オフ(画像は動く。文字に合わせて押すとコピー)')}document.querySelectorAll('.pg').forEach(p=>p.classList.toggle('selmode',RSEL))}
 $('rsel').onclick=()=>setRsel(!RSEL);
 function zoomBoth(f){['vq','vo'].forEach(id=>{const el=$(id);if(el._zoomAt)el._zoomAt(el.clientWidth/2,el.clientHeight/2,f)})}
 $('zin').onclick=()=>zoomBoth(1.25);$('zout').onclick=()=>zoomBoth(1/1.25);$('zfit').onclick=()=>['vq','vo'].forEach(id=>{const el=$(id);if(el._home)el._home()});
@@ -297,7 +323,7 @@ function showV(i){
  const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',NOORDER:'📋 発注されなかった品目',OK_IMG:'☑ 画像で一致'}[r.status];
  $('vcnt').textContent=`${i+1} / ${ITEMS.length}`;$('vtitle').textContent=`${it.vendor} ・ ${it.pair}`;
  $('vmsg').innerHTML=`<b>${mark} ${esc(r.model)}</b>${r.msg?' — '+esc(r.msg):''}<div>${ckHtml(r.checks)}</div>`;
- $('vql').textContent=ROLES[0]+'(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)';$('vol').textContent=ROLES[1]+'(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)';pane($('vq'),r.qpage,r.qbox,r.qraw,r.status,r.qnomatch);pane($('vo'),r.opage,r.obox,r.oraw,r.status,r.onomatch);
+ $('vql').textContent=ROLES[0]+'(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)';$('vol').textContent=ROLES[1]+'(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)';pane($('vq'),r.qpage,r.qbox,r.qraw,r.status,r.qnomatch);pane($('vo'),r.opage,r.obox,r.oraw,r.status,r.onomatch);$('vq')._rows=r.qbox?[{box:r.qbox,cp:r.cp}]:[];$('vo')._rows=r.obox?[{box:r.obox,cp:r.cp}]:[];
  $('vchk').checked=it.done;$('vprev').disabled=i===0;$('vnext').disabled=i===ITEMS.length-1;
 }
 function openV(i){$('vw').hidden=false;showV(i)}
