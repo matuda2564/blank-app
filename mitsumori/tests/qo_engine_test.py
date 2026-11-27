@@ -32,7 +32,7 @@ assert res and not any(r["status"] == "DIFF" for r in res) and any("分かれて
 # 数量が足りない分納(6+3=9個): 違いとして出る
 ob2 = doc("発注", "ob2.pdf", [("KQ2H06-M5", "継手", 3, 380)])
 out = E.build([q], [oa, ob2]); res = [r for _, _, _, rs, _, _ in out for r in rs]
-assert any(r["status"] == "DIFF" and "数量" in r["msg"] for r in res), res
+assert any(r["status"] == "DIFF" and "個数" in r["msg"] for r in res), res
 print("qo_engine_unit OK")
 
 # --- 単価・金額は、違って当たり前(比べない)。品名が、まるで違うと、型番が同じでも、要確認
@@ -48,5 +48,5 @@ res = [r for _, _, _, rs, _, _ in E.build([qa], [pb]) for r in rs]
 assert res and res[0]["status"] == "REVIEW" and "品名" in res[0]["msg"], res   # 品名が、まるで違う
 pc = doc2("発注", "pc.pdf", [("AW20-02BE-D", "レギュレータ", 5, 4200)])
 res = [r for _, _, _, rs, _, _ in E.build([qa], [pc]) for r in rs]
-assert res and res[0]["status"] == "DIFF" and "数量" in res[0]["msg"] and "金額" not in res[0]["msg"], res   # 数量の違いだけを、知らせる
+assert res and res[0]["status"] == "DIFF" and "個数" in res[0]["msg"] and "金額" not in res[0]["msg"], res   # 数量の違いだけを、知らせる
 print("qo_engine_price_name OK")
