@@ -123,7 +123,7 @@ def serialize(vendors):
 
     for v in vendors:
         sv = {"vendor": v["vendor"], "slot": v.get("slot"), "warnings": v["warnings"], "pairs": [], "seconds": round(v.get("seconds", 0), 1),
-              "count": {"OK": 0, "OK_IMG": 0, "DIFF": 0, "REVIEW": 0, "NOPAIR": 0}}
+              "count": {"OK": 0, "OK_IMG": 0, "DIFF": 0, "REVIEW": 0, "NOORDER": 0, "NOPAIR": 0}}
         for p in v["pairs"]:
             q, o = p["q"], p["o"]
             sp = {"q": q.name if q else None, "o": o.name if o else None, "why": p["why"], "compared": p["compared"], "skipped": p["skipped"], "skipnote": p.get("skipnote"), "qread": C.doc_info(q, p.get("mode", "qo")), "oread": C.doc_info(o, p.get("mode", "qo")), "rows": []}

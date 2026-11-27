@@ -50,7 +50,7 @@ jobs:
         shell: pwsh
         run: |
           "${{ github.run_number }}" | Out-File -Encoding ascii -NoNewline mitsumori/BUILD.txt
-          pyinstaller --noconfirm --onedir --windowed --name MitsumoriCheck --collect-all rapidocr_onnxruntime --collect-all webview --collect-all pythonnet --collect-all clr_loader --hidden-import clr `
+          pyinstaller --noconfirm --onedir --windowed --name MitsumoriCheck --collect-all rapidocr_onnxruntime --collect-all webview --collect-all pythonnet --collect-all clr_loader --hidden-import clr --hidden-import qo_engine `
             --add-data "mitsumori/index.html;." --add-data "mitsumori/BUILD.txt;." --add-data "C:\Program Files\Tesseract-OCR;tesseract" --paths mitsumori mitsumori/launcher.py
       - name: 作った exe の自己点検
         shell: pwsh
