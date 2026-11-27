@@ -127,6 +127,8 @@ def serialize(vendors):
         for p in v["pairs"]:
             q, o = p["q"], p["o"]
             sp = {"q": q.name if q else None, "o": o.name if o else None, "why": p["why"], "compared": p["compared"], "skipped": p["skipped"], "skipnote": p.get("skipnote"), "qread": C.doc_info(q, p.get("mode", "qo")), "oread": C.doc_info(o, p.get("mode", "qo")), "rows": []}
+            sp["qpage0"] = page_id(q, 0) if q and q.pages else None   # 一覧に出す、書類の見た目(1ページ目)
+            sp["opage0"] = page_id(o, 0) if o and o.pages else None
             if q and o and p.get("mode", "qo") == "qo":
                 st_, dt_ = C.quote_check(q, o); sp["refcheck"] = {"st": st_, "detail": dt_}
             if not (q and o):
