@@ -5,10 +5,10 @@
   ② 見積番号      … 発注書に書いてある見積番号が、見積の番号と一致すれば、いちばん強い根拠
   ③ 型番(品番)   … 書き方の違い(大文字・小文字・ハイフン・空白)は、同じとみなす。1〜2文字違いは『近い型番』として、人に確認
   ④ 品名          … 型番が無い行(送料など)の、手がかり。ひもづけた後は、型番が同じでも、品名がまるで違えば『要確認』
-  ⑤ 数量          … ひもづけた後、違いを知らせる。**単価・金額は、見積と発注書で違って当たり前なので、比べない**(同じ型番が複数あるときの、ひもづけの手がかりにだけ使う)
+  ⑤ 個数          … ひもづけた後、違いを知らせる。**単価・金額は、見積と発注書で違って当たり前なので、比べない**(同じ型番が複数あるときの、ひもづけの手がかりにだけ使う)
 「行」ごとに、見積の行と、発注書の行を、1対1で、ひもづける。だから、
   ・見積2枚の中身が、発注書1枚に収まっていても、 ・見積1枚が、発注書2枚に分かれていても(納品の分割)、行は、ひもづく。
-  ・見積にあって、発注書に無い品目 = 『発注されなかった品目』(NOORDER。数量減・見送りの可能性。エラーではないが、必ず、知らせる)
+  ・見積にあって、発注書に無い品目 = 『発注されなかった品目』(NOORDER。個数減・見送りの可能性。エラーではないが、必ず、知らせる)
   ・発注書にあって、見積に無い品目 = 『見積に無い品目』(違い・要確認)
 「確実」は、文字入りPDF・Excelだけ。ひもづけが曖昧(型番が違う書き方・品名だけ)な行は、必ず、人に回す。
 """
@@ -184,7 +184,7 @@ NAME_NG = 0.3   # これ未満は、品名が違う可能性
 
 
 def row_result(ctx, q, o, qr, pr, kind, extra=None):
-    """ひもづいた1組の行の、判定。**比べるのは、型式・品名・数量だけ**。単価・金額は、見積と発注書で、違って当たり前なので、比べない"""
+    """ひもづいた1組の行の、判定。**比べるのは、型式・品名・個数だけ**。単価・金額は、見積と発注書で、違って当たり前なので、比べない"""
     ck = [("見積番号",) + C.quote_check(q, o)]
     cq, co = ctx.comp[id(q)], ctx.comp[id(o)]
     if cq and co: ck.append(("会社名", "ok" if nsim(cq, co) >= 0.75 else "na", "同じ" if nsim(cq, co) >= 0.75 else f"見積 {cq} / 発注書 {co}"))
@@ -200,11 +200,11 @@ def row_result(ctx, q, o, qr, pr, kind, extra=None):
     if extra: vb = extra["qty"]
     if va is not None and vb is not None:
         same = va == vb
-        ck.append(("数量", "ok" if same else "ng", "一致" if same else f"見積 {va:,} / 発注 {vb:,}"))
-        if not same: diffs.append(f"数量: 見積「{va:,}」⇔ 発注「{vb:,}」")
+        ck.append(("個数", "ok" if same else "ng", "一致" if same else f"見積 {va:,} / 発注 {vb:,}"))
+        if not same: diffs.append(f"個数: 見積「{va:,}」⇔ 発注「{vb:,}」")
     else:
         found = (va is None and q.src == "ocr" and vb is not None and C._found_num(q, vb)) or (vb is None and o.src == "ocr" and va is not None and C._found_num(o, va))
-        ck.append(("数量", "ok" if found else "na", "画像の文字の中に、同じ数字があった" if found else "読み取れず"))
+        ck.append(("個数", "ok" if found else "na", "画像の文字の中に、同じ数字があった" if found else "読み取れず"))
     ocr = q.src == "ocr" or o.src == "ocr"
     sure = bool(qr.get("exact", True)) and bool(pr.get("exact", True))
     unv = qr.get("unverified") or pr.get("unverified")
@@ -217,7 +217,7 @@ def row_result(ctx, q, o, qr, pr, kind, extra=None):
         return res("REVIEW", "型番が1〜2文字違う行を、同じ品目と見て、ひもづけた(見間違いか本当の違いか、確認してください)。" + " / ".join(diffs + ([name_msg] if name_msg else [])))
     if kind == "name":
         if not diffs and sure and not ocr and not probs and ns is not None and ns >= 0.9:
-            return res("OK", "")   # 型番の無い行(送料など)が、品名・数量とも同じ
+            return res("OK", "")   # 型番の無い行(送料など)が、品名・個数とも同じ
         return res("DIFF" if diffs and sure else "REVIEW", "型番が無い行(送料など)を、品名で、同じ品目と見て、ひもづけた。" + " / ".join(diffs))
     if diffs:
         return res("DIFF" if sure else "REVIEW", " / ".join(diffs + ([name_msg] if name_msg else [])) + ("" if sure else "(違いに見えるが、画像の読み取りが確実でない)"))
@@ -226,8 +226,8 @@ def row_result(ctx, q, o, qr, pr, kind, extra=None):
     if probs or (not sure and not ocr):
         return res("REVIEW", "読み取りに自信がない: " + " / ".join(dict.fromkeys(probs or ["読み取りが確実でない"])))
     if ocr and (not sure or unv):
-        if any(c[0] == "数量" and c[1] == "ok" for c in ck): return res("OK_IMG", "型式・数量は、相手の書類と一致しました。画像の読み取りは確実でないので、目で確認してください")
-        return res("REVIEW", "読み取りに自信がない(画像の読み取りで、数量を確かめられない)")
+        if any(c[0] == "個数" and c[1] == "ok" for c in ck): return res("OK_IMG", "型式・個数は、相手の書類と一致しました。画像の読み取りは確実でないので、目で確認してください")
+        return res("REVIEW", "読み取りに自信がない(画像の読み取りで、個数を確かめられない)")
     return res("OK_IMG" if ocr else "OK", "")
 
 
@@ -283,7 +283,7 @@ def build(quotes, orders):
         for qi, qr in enumerate(q.rows):
             if (id(q), qi) in qline or (id(q), qi) in split: continue
             label = (qr.get("model_raw") or qr.get("name") or "(型番なし)")[:22]
-            pairs[(id(q), mo)]["results"].append({"status": "NOORDER", "model": label, "msg": "見積にあるが、発注書に無い品目(数量減・見送りの可能性。発注されなかった品目です)", "qrow": qr, "orow": None})
+            pairs[(id(q), mo)]["results"].append({"status": "NOORDER", "model": label, "msg": "見積にあるが、発注書に無い品目(個数減・見送りの可能性。発注されなかった品目です)", "qrow": qr, "orow": None})
     out = []
     for (dq, do), pdt in pairs.items():
         q, o = pdt["q"], pdt["o"]
@@ -293,7 +293,7 @@ def build(quotes, orders):
         why = f"{n}行が、ひもづいた。根拠: " + (" / ".join(pdt["ev"]) if pdt["ev"] else "型番が一致")
         if others_o: why += f"。★この発注書は、ほかの見積(「{'」「'.join(others_o)}」)の品目も、含んでいる"
         if others_q: why += f"。★この見積は、ほかの発注書(「{'」「'.join(others_q)}」)にも、分かれている"
-        out.append((q, o, why, pdt["results"], ["型式", "品名", "数量"], ["単価", "金額"]))
+        out.append((q, o, why, pdt["results"], ["型式", "品名", "個数"], ["単価", "金額"]))
     paired_q = {k[0] for k in link}; paired_o = {k[1] for k in link}
     for o in orders:
         if id(o) not in paired_o:
