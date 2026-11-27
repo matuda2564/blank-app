@@ -22,11 +22,11 @@ button.go{background:var(--pri);color:#fff}button.go:disabled{background:#9aa7b6
 button.rst{background:#fff;color:var(--ng);border:2px solid var(--ng)}button.sv{background:#fff;color:var(--pri);border:2px solid var(--pri);font-size:15px;padding:8px 16px}
 .prog{flex:1;min-width:200px}.prog .t{height:12px;background:#dfe5ee;border-radius:6px;overflow:hidden}.prog .t i{display:block;height:100%;background:var(--img);width:0}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.chip{padding:6px 12px;border-radius:8px;font-size:15px}
-.c-ok{background:var(--okbg)}.c-img{background:var(--imgbg)}.c-ng{background:var(--ngbg)}.c-rv{background:var(--rvbg)}.c-np{background:#e6e8ec}
+.c-no{background:#e9edf3}.c-ok{background:var(--okbg)}.c-img{background:var(--imgbg)}.c-ng{background:var(--ngbg)}.c-rv{background:var(--rvbg)}.c-np{background:#e6e8ec}
 .vendor{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:14px 0}.vendor h2{margin:4px 0 6px;font-size:19px}
 .pair{border-top:1px solid var(--line);padding:8px 0}.pair .tt{font-weight:700}.pair .meta{color:var(--sub);font-size:13px}
 .row{border-left:6px solid var(--line);padding:6px 10px;margin:6px 0;border-radius:4px}
-.row.DIFF{border-color:var(--ng);background:#fff7f7}.row.REVIEW{border-color:var(--rv);background:#fffbea}.row.OK_IMG{border-color:var(--img);background:#f5f9ff}.row.OK{border-color:var(--ok)}
+.row.NOORDER{border-color:#8a94a6;background:#f4f6f9}.row.DIFF{border-color:var(--ng);background:#fff7f7}.row.REVIEW{border-color:var(--rv);background:#fffbea}.row.OK_IMG{border-color:var(--img);background:#f5f9ff}.row.OK{border-color:var(--ok)}
 .row .mdl{font-weight:700}.row .msg{font-size:14px;margin:2px 0}
 .two{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}.two>div{flex:1;min-width:260px}.two small{color:var(--sub);display:block}
 .two img{max-width:100%;border:1px solid #bcc6d4;border-radius:4px;background:#fff}.raw{font-family:monospace;font-size:12px;background:#f1f3f6;padding:3px 6px;border-radius:4px}
@@ -44,7 +44,7 @@ button.sm.pri{background:var(--pri);color:#fff}
 .pgin{position:absolute;left:0;top:0;width:100%;transform-origin:0 0}.pgin img{width:100%;display:block;pointer-events:none;-webkit-user-drag:none}
 .pg .warn{position:absolute;left:6px;right:6px;top:6px;z-index:3}
 .bx{position:absolute;border:2px solid #e11d2e;border-radius:2px;box-shadow:0 0 5px rgba(225,29,46,.55);pointer-events:none}
-.bx.REVIEW{border-color:#e8820c;box-shadow:0 0 5px rgba(232,130,12,.6)}.bx.OK_IMG{border-color:#2f6fd6;box-shadow:0 0 5px rgba(47,111,214,.55)}
+.bx.NOORDER{border-color:#6b7488;box-shadow:0 0 5px rgba(107,116,136,.55)}.bx.REVIEW{border-color:#e8820c;box-shadow:0 0 5px rgba(232,130,12,.6)}.bx.OK_IMG{border-color:#2f6fd6;box-shadow:0 0 5px rgba(47,111,214,.55)}
 .ck{display:inline-block;margin:2px 4px 2px 0;padding:2px 8px;border-radius:12px;font-size:13px;border:1px solid #bcc6d4;background:#fff}.ck.ok{border-color:#2a9d5c;color:#17703f;background:#eefaf3}.ck.ng{border-color:#d33;color:#a11;background:#fff0f0;font-weight:700}.ck.na{color:#667385;background:#f4f6f9}
 .zoom{display:flex;align-items:center;gap:4px}.zoom button{min-width:34px}
 .vf{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:8px}.vf .sp{flex:1}
@@ -73,10 +73,10 @@ button.sm.pri{background:var(--pri);color:#fff}
 <div class="opt" id="qtyrow" hidden><label><input type="checkbox" id="qty"> 数量も比べる</label> <small>(チェックなし=型式と品名だけ)</small></div>
 <details class="note" id="criteria"><summary><b>どういう基準で、判断していますか?</b>(クリックで開く)</summary>
 <p><b>① 書類の読み方</b>: 文字入りのPDFとExcelは、書いてある文字を、そのまま読みます。スキャン・写真は、2種類の読み取り(RapidOCR と Tesseract)で読み、<b>2つが一致した行だけ</b>「確実」とします。表の「見出し」(型式・数量・単価・金額など)の位置で、列を分けます。結果の下の「読み取った中身を見る」で、<b>何を読んだか</b>を確認できます。</p>
-<p><b>② 組の決め方</b>(見積 ⇔ 発注): 見積番号が同じなら組にします。番号がないときは、<b>型式の重なりが50%以上</b>で、2番目の候補より20ポイント以上高いときだけ組にします。決まらなければ「組みにならなかった」と出します。<br>(見積 ⇔ 見積): 客先1枚・仕入先1枚なら、そのまま組にします。複数あるときは、<b>型番の重なりが30%以上</b>で、2番目より15ポイント以上高いときだけ組にします。</p>
+<p><b>② 判断の順番</b>(見積 ⇔ 発注。何社・何枚まとめて入れても、同じ順番です): <b>①会社名</b>(別の会社の書類どうしは、組にしません) → <b>②見積番号</b>(発注書に書いてある見積番号が、見積の番号と一致すれば、いちばん強い根拠) → <b>③型番・品番</b>(大文字小文字・ハイフン・空白の違いは同じとみなします。1〜2文字違いは「近い型番」として、人に確認) → <b>④品名</b>(型番の無い行=送料など、最後の手がかり。単価か金額が合うときだけ使います) → <b>⑤数量・単価・金額</b>(同じ型番が複数あるときの決め手。ひもづけたあと、違いを知らせます)。<b>書類ごとではなく、「行」ごとに、ひもづけます。</b>だから、見積2枚の中身が発注書1枚に収まっていても、見積1枚が発注書2枚に分かれていても、行はひもづきます。決まらないものは、黙って決めず、理由(見積番号・会社名・型番の重なり)を出して、人に回します。</p>
 <p><b>③ 同じ型式の判定</b>: 全角と半角、大文字と小文字、ハイフン、空白の違いは、<b>同じ</b>とみなします。それ以外の違いは、<b>1文字でも、違う</b>とします。1〜2文字だけ違う型式は「近い型式」として、<b>要確認</b>に出します。</p>
 <p><b>④ 比べる項目</b>: 見積 ⇔ 発注は、型式・数量・単価・金額・品名・単位・納期。見積 ⇔ 見積は、<b>表の「型式・品名」の列だけ</b>を読み(見出しの「数量・単価・金額」より左。宛先・日付・備考・納期・住所は読みません)、その中から、<b>型番らしい文字列だけ</b>を比べます(英字と数字が混ざった4文字以上の文字列。電話番号・インボイス番号・「100V」のような単位つきの数字は、拾いません)。品名・数量・単価・金額・合計は、比べません。画像の書類は、<b>2種類の読み取りの両方で見つかった型番だけ</b>を「確実」とし、片方だけなら「要確認」に出します。</p>
-<p><b>⑤ 結果の意味</b>: ✅=文字入りPDF・Excelで、全項目が一致 / ☑=画像で、2種類の読み取りが一致(目で確認) / ❌=違いがある(はっきり読めている) / ⚠=読み取りに自信がない・近い型式・品名の違いなど。<b>✅以外は、必ず人が見てください。</b></p>
+<p><b>⑤ 結果の意味</b>: ✅=文字入りPDF・Excelで、全項目が一致 / ☑=画像で、型式・数量・金額が相手の書類と一致(目で確認) / ❌=違いがある(はっきり読めている。<b>見積に無い品目が発注された</b>ときも、ここ) / ⚠=読み取りに自信がない・近い型番・品名で判断した行 / 📋=<b>発注されなかった品目</b>(見積にあって、発注書に無い。数量減・見送りの可能性。エラーではありませんが、必ず知らせます) / 相手なし=組になる書類が無い。✅以外は、必ず人が見てください。</p>
 </details>
 <div class="slots" id="slots"></div>
 <div class="bar">
@@ -150,7 +150,7 @@ async function showResult(){
  if(r.status==='error'){$('out').innerHTML=`<div class="err">照合に失敗しました: ${esc(r.msg)}</div>`;return}
  if(r.status!=='done')return;
  const R=r.result.vendors;PAGES=r.result.pages||{};ITEMS=[];
- const tot={OK:0,OK_IMG:0,DIFF:0,REVIEW:0,NOPAIR:0};R.forEach(v=>{for(const k in tot)tot[k]+=v.count[k]});
+ const tot={OK:0,OK_IMG:0,DIFF:0,REVIEW:0,NOORDER:0,NOPAIR:0};R.forEach(v=>{for(const k in tot)tot[k]+=(v.count[k]||0)});
  let h=`<div class="chips" id="sum">${chips(tot)}</div><div id="todo" style="margin:4px 0;color:var(--sub)"></div>`;
  for(const v of R){
   h+=`<div class="vendor"><h2>${esc(v.vendor)}</h2><div class="chips">${chips(v.count)}</div>`;
@@ -162,7 +162,7 @@ async function showResult(){
    if(p.refcheck)h+=`<div class="ck ${p.refcheck.st}">見積番号の突き合わせ: ${p.refcheck.st==='ok'?'○':(p.refcheck.st==='ng'?'✕ ':'ー ')}${esc(p.refcheck.detail)}</div>`;
    h+=`<div class="meta">比べた項目: ${esc(p.compared.join('・'))}${p.skipnote?` / 比べない項目: ${esc(p.skipnote)}`:(p.skipped.length?` / 比べなかった項目(片方の書類に無い): ${esc(p.skipped.join('・'))}`:'')}</div>`;
    h+=readPanel(p);
-   const order={DIFF:0,REVIEW:1,OK_IMG:2,OK:3};
+   const order={DIFF:0,REVIEW:1,NOORDER:2,OK_IMG:3,OK:4};
    const rows=p.rows.slice().sort((a,b)=>order[a.status]-order[b.status]);
    const okr=rows.filter(r=>r.status==='OK');
    rows.filter(r=>r.status!=='OK').forEach(r=>{ITEMS.push({row:r,vendor:v.vendor,pair:`${ROLES[0]}「${p.q}」⇔${ROLES[1]}「${p.o}」`,done:false});h+=rowHtml(r,ITEMS.length-1)});
@@ -176,9 +176,9 @@ async function showResult(){
 function readPanel(p){
  const one=(lab,d)=>d?`<div><b>${esc(lab)}「${esc(d.name)}」</b> <small>(${esc(d.kind||'種類不明')}・${d.mode==='qq'?d.rows.length+'個の型番を発見':d.rows.length+'行を読み取り'})</small>${d.region?`<div class="meta">読んだ範囲: ${esc(d.region)}</div>`:''}${d.mode==='qq'?(d.rows.length?`<table class="rd"><tr><th>見つけた型番</th><th>その行の文字</th><th>確実?</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.m)}</td><td>${esc(r.n||'')}</td><td>${r.sure?'○':(r.noise?'ゴミの疑い(無視)':'要確認')}</td></tr>`).join('')}</table>`:`<div class="warn">型番らしい文字列を、1つも見つけられませんでした(読み取った行: ${d.nlines}行)</div>`):(d.rows.length?`<table class="rd"><tr><th>型式(読んだまま)</th><th>品名</th><th>数量</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.m)}</td><td>${esc(r.n||'')}</td><td>${esc(r.q==null?'':r.q)}</td></tr>`).join('')}</table>`:'<div class="warn">明細の行を、1行も読めませんでした</div>')}${d.notes.length?`<div class="meta">注意: ${esc(d.notes.join(' / '))}</div>`:''}</div>`:'';
  return `<details class="rdp"><summary>読み取った中身を見る(ツールが、書類から、何を読んだか)</summary><div class="two">${one(ROLES[0],p.qread)}${one(ROLES[1],p.oread)}</div></details>`}
-function chips(c){return `<span class="chip c-ok">✅ 確実に一致 <b>${c.OK}</b></span><span class="chip c-img">☑ 画像で一致(目で確認) <b>${c.OK_IMG}</b></span><span class="chip c-ng">❌ 違い <b>${c.DIFF}</b></span><span class="chip c-rv">⚠ 要確認 <b>${c.REVIEW}</b></span><span class="chip c-np">相手なし <b>${c.NOPAIR}</b>組</span>`}
+function chips(c){return `<span class="chip c-ok">✅ 確実に一致 <b>${c.OK}</b></span><span class="chip c-img">☑ 画像で一致(目で確認) <b>${c.OK_IMG}</b></span><span class="chip c-ng">❌ 違い <b>${c.DIFF}</b></span><span class="chip c-rv">⚠ 要確認 <b>${c.REVIEW}</b></span><span class="chip c-no" title="見積にあるが、発注書に無い品目(数量減・見送りの可能性)">📋 発注されなかった品目 <b>${c.NOORDER||0}</b></span><span class="chip c-np">相手なし <b>${c.NOPAIR}</b>組</span>`}
 function rowHtml(r,idx){
- const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',OK_IMG:'☑ 画像で一致'}[r.status];
+ const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',NOORDER:'📋 発注されなかった品目',OK_IMG:'☑ 画像で一致'}[r.status];
  const side=(lab,img,raw)=>`<div><small>${lab}</small>${img?`<img src="data:image/png;base64,${img}">`:(raw?`<div class="raw">${esc(raw)}</div>`:'<small>(なし)</small>')}</div>`;
  return `<div class="row ${r.status}" id="row${idx}"><label class="chk"><input type="checkbox" id="chk${idx}" onchange="setDone(${idx},this.checked)"> 確認した</label><span class="mdl">${mark} ${esc(r.model)}</span> <button class="sm" onclick="openV(${idx})">書類全体で見る</button>${r.msg?`<div class="msg">${esc(r.msg)}</div>`:''}${r.checks?`<div>${ckHtml(r.checks)}</div>`:''}<div class="two">${side(ROLES[0],r.qimg,r.qraw)}${side(ROLES[1],r.oimg,r.oraw)}</div></div>`;
 }
@@ -207,7 +207,7 @@ $('zin').onclick=()=>zoomBoth(1.25);$('zout').onclick=()=>zoomBoth(1/1.25);$('zf
 const ckHtml=cs=>cs?cs.map(c=>`<span class="ck ${c[1]}" title="${esc(c[2]||'')}">${esc(c[0])} ${c[1]==='ok'?'○':(c[1]==='ng'?'✕':'ー')}${c[1]!=='ok'&&c[2]?'('+esc(c[2])+')':''}</span>`).join(''):'';
 function showV(i){
  if(i<0||i>=ITEMS.length)return;CUR=i;const it=ITEMS[i],r=it.row;
- const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',OK_IMG:'☑ 画像で一致'}[r.status];
+ const mark={DIFF:'❌ 違い',REVIEW:'⚠ 要確認',NOORDER:'📋 発注されなかった品目',OK_IMG:'☑ 画像で一致'}[r.status];
  $('vcnt').textContent=`${i+1} / ${ITEMS.length}`;$('vtitle').textContent=`${it.vendor} ・ ${it.pair}`;
  $('vmsg').innerHTML=`<b>${mark} ${esc(r.model)}</b>${r.msg?' — '+esc(r.msg):''}<div>${ckHtml(r.checks)}</div>`;
  $('vql').textContent=ROLES[0]+'(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)';$('vol').textContent=ROLES[1]+'(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)';pane($('vq'),r.qpage,r.qbox,r.qraw,r.status,r.qnomatch);pane($('vo'),r.opage,r.obox,r.oraw,r.status,r.onomatch);

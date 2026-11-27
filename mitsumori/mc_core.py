@@ -864,16 +864,30 @@ def item_rows(lines):
             if sum(1 for k in ("qty", "price", "amount") if k in vals) >= 2 or ("qty" in vals and "amount" in vals):
                 nums.append((L, vals))
         if not nums: continue
-        for i, L in enumerate(body):
-            left = [(t, a, b) for t, a, b in (L.get("toks") or []) if (a + b) / 2 < qx]
-            for tok in model_tokens(" ".join(t for t, _, _ in left)):
-                yc = (L["y0"] + L["y1"]) / 2
-                best = min(nums, key=lambda nv: (abs((nv[0]["y0"] + nv[0]["y1"]) / 2 - yc), -((nv[0]["y0"]) )))
-                NL, vals = best
-                rows.append({"model_raw": tok, "model": norm(tok), "page": pg, "src": L["src"], "problems": [], "soft": [],
-                             "qty": vals.get("qty"), "price": vals.get("price"), "amount": vals.get("amount"), "unit": vals.get("unit"),
-                             "name": None, "due": None, "raw": NL["text"],
-                             "x0": min(L["x0"], NL["x0"]), "y0": min(L["y0"], NL["y0"]), "x1": max(L["x1"], NL["x1"]), "y1": max(L["y1"], NL["y1"])})
+        # 数字の行ごとに、1つの明細行にする。数字の行ではない行(品名・型番だけの行)は、いちばん近い数字の行に付ける
+        groups = {id(nl): [nl] for nl, _ in nums}
+        for L in body:
+            if id(L) in groups: continue
+            yc = (L["y0"] + L["y1"]) / 2
+            nl, _ = min(nums, key=lambda nv: (abs((nv[0]["y0"] + nv[0]["y1"]) / 2 - yc), -nv[0]["y0"]))
+            groups[id(nl)].append(L)
+        for nl, vals in nums:
+            Ls = sorted(groups[id(nl)], key=lambda x: x["y0"])
+            models, names, lefts = [], [], []
+            for L in Ls:
+                left = [t for t, a, b in (L.get("toks") or []) if (a + b) / 2 < qx]
+                text = " ".join(left); lefts.append(text)
+                mt = model_tokens(text)
+                models += mt
+                nm = text
+                for m in mt: nm = nm.replace(m, " ")
+                nm = re.sub(r"^\s*\d{1,3}[.\s]\s*", "", nm).strip()
+                if nm: names.append(nm)
+            m0 = models[0] if models else ""
+            rows.append({"model_raw": m0, "model": norm(m0) if m0 else "", "page": pg, "src": nl["src"], "problems": [], "soft": [],
+                         "qty": vals.get("qty"), "price": vals.get("price"), "amount": vals.get("amount"), "unit": vals.get("unit"),
+                         "name": " ".join(names)[:80] or None, "due": None, "raw": nl["text"], "alt_models": models[1:], "left": " ".join(lefts),
+                         "x0": min(L["x0"] for L in Ls), "y0": min(L["y0"] for L in Ls), "x1": max(L["x1"] for L in Ls), "y1": max(L["y1"] for L in Ls)})
     for r in rows:
         if r.get("qty") and r.get("price") and r.get("amount") is not None and r["qty"] * r["price"] != r["amount"]:
             r["problems"].append(f"数量×単価={r['qty']*r['price']:,}が金額{r['amount']:,}と合わない")
@@ -1313,6 +1327,15 @@ def run_vendor(vdir, workers=4, progress=None, name=None, mode="qo", with_qty=Fa
         docs[d.role].append(d)
     out["seconds"] = sum(d.seconds for r in docs.values() for d in r)
     A, B = docs[roles[0]], docs[roles[1]]
+    if mode == "qo":
+        try:
+            import qo_engine
+            for q, o, why, results, compared, skipped in qo_engine.build(A, B):
+                out["pairs"].append({"q": q, "o": o, "why": why, "results": results, "compared": compared, "skipped": skipped, "mode": "qo"})
+            return out
+        except Exception:
+            log("新しい照合エンジンが失敗。従来の照合に切り替える: " + traceback.format_exc())
+            out["pairs"] = []
     if mode == "qq" and len(A) == 1 and len(B) == 1:
         pairs = [(A[0], B[0], "1対1で、そのまま組にした")]   # 見積番号が違うのが普通なので、1枚ずつなら、迷わず組にする
     else:
