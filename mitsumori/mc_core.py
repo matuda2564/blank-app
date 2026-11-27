@@ -1229,6 +1229,23 @@ def row_box(doc, row):
         return None
 
 
+def page_words(doc, pno):
+    """範囲を指定してコピーするための、ページ上の『単語』と位置(ページ画像に対する割合 0〜1)。空白で区切った文字のかたまりごと"""
+    out = []
+    try:
+        im, sc = doc.pages[pno]
+        f = sc if doc.kind == "文字入りPDF" else 1.0
+        W, H = float(im.width), float(im.height)
+        for L in doc.lines:
+            if L.get("page", 0) != pno or not L.get("toks") or "y0" not in L: continue
+            y0, y1 = max(0.0, L["y0"] * f / H), min(1.0, L["y1"] * f / H)
+            for t, a, b in L["toks"]:
+                out.append([round(max(0.0, a * f / W), 4), round(y0, 4), round(min(1.0, b * f / W), 4), round(y1, 4), t])
+    except Exception:
+        return []
+    return out
+
+
 def page_jpeg_b64(doc, pno, maxw=1000):
     """ページ全体の画像(JPEG・幅を縮める)。画面に出す用"""
     im, _ = doc.pages[pno]

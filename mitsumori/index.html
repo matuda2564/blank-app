@@ -61,7 +61,7 @@ button.sm.pri{background:var(--pri);color:#fff}
 .tabs button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px 8px 0 0;padding:9px 16px;font:inherit;font-size:14px;cursor:pointer}
 .tabs button.on{background:var(--pri);color:#fff;border-color:var(--pri);font-weight:700}
 .bn{margin:8px 20px 0;padding:10px 14px;border-radius:8px;font-size:14px;line-height:1.6}.bn.ng{background:var(--ngbg);color:#7a1f1f;border:1px solid var(--ng)}.bn.rv{background:var(--rvbg);color:#5c4300;border:1px solid var(--rv)}
-.cpc{cursor:copy}.cpc:hover{background:#e8f1ff}.rd{border-collapse:collapse;font-size:12px;margin:4px 0}.rd td,.rd th{border:1px solid var(--line);padding:2px 8px;text-align:left}.rdp{margin:6px 0;font-size:13px}.rdp summary{cursor:pointer;color:var(--pri)}
+.pg.selmode{cursor:crosshair}.selbox{position:absolute;border:2px dashed #1f6f43;background:rgba(31,111,67,.18);pointer-events:none;z-index:6}#rsel.on{background:#1f6f43;color:#fff;border-color:#1f6f43}.cpc{cursor:copy}.cpc:hover{background:#e8f1ff}.rd{border-collapse:collapse;font-size:12px;margin:4px 0}.rd td,.rd th{border:1px solid var(--line);padding:2px 8px;text-align:left}.rdp{margin:6px 0;font-size:13px}.rdp summary{cursor:pointer;color:var(--pri)}
 .opt{margin:8px 0;font-size:14px}.opt small{color:var(--sub)}
 @media print{header,.slots,.bar,.note,.tabs,.opt{display:none}}
 </style></head><body>
@@ -98,7 +98,7 @@ button.sm.pri{background:var(--pri);color:#fff}
 <div id="out"></div>
 </main>
 <div class="vw" id="vw" hidden><div class="vbox">
- <div class="vh"><b id="vcnt"></b><span id="vtitle"></span><span class="sp"></span><span class="zoom"><small>両方を:</small><button class="sm" id="zout" title="縮小">－</button><button class="sm" id="zfit" title="元の大きさ・位置に戻す">元に戻す</button><button class="sm" id="zin" title="拡大">＋</button></span><span class="kbd">画像: ホイール=拡大縮小 / 左クリックを押して引っぱる=移動 / ダブルクリック=元に戻す　キー: ← →=前後 / Enter=確認して次へ / Esc=閉じる</span><button class="sm" id="vx">✕ 閉じる</button></div>
+ <div class="vh"><b id="vcnt"></b><span id="vtitle"></span><span class="sp"></span><span class="zoom"><small>両方を:</small><button class="sm" id="zout" title="縮小">－</button><button class="sm" id="zfit" title="元の大きさ・位置に戻す">元に戻す</button><button class="sm" id="zin" title="拡大">＋</button></span><button class="sm" id="rsel" title="押すと、画像の上を、なぞった範囲の文字を、コピーできます(Shiftを押しながらなぞっても、同じです)">📋 範囲コピー: オフ</button><span class="kbd">画像: ホイール=拡大縮小 / 左クリックを押して引っぱる=移動(「範囲コピー」がオンのときや、Shiftを押しながらは、なぞった範囲をコピー) / ダブルクリック=元に戻す　キー: ← →=前後 / Enter=確認して次へ / Esc=閉じる</span><button class="sm" id="vx">✕ 閉じる</button></div>
  <div id="vmsg"></div>
  <div class="vbody"><div class="pane"><small id="vql">見積(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)</small><div class="pg" id="vq"></div></div><div class="pane"><small id="vol">発注(枠の行を確認。赤=違い・オレンジ=要確認・青=画像で一致)</small><div class="pg" id="vo"></div></div></div>
  <div class="vf"><button id="vprev">◀ 前へ</button><label><input type="checkbox" id="vchk"> 確認した</label><span class="sp"></span><button class="go" id="vok">確認した → 次の未確認へ</button><button id="vnext">次へ ▶</button></div>
@@ -107,7 +107,7 @@ button.sm.pri{background:var(--pri);color:#fff}
 const $=id=>document.getElementById(id);
 const MODES={qo:{roles:['見積','発注'],title:'見積・発注 照合'},qq:{roles:['客先見積','仕入先見積'],title:'見積 ⇔ 見積 照合(客先と仕入先)'}};
 let MODE='qo', ROLES=MODES.qo.roles;
-let ST=null, timer=null, PAGES={}, ITEMS=[], CUR=-1;
+let ST=null, timer=null, PAGES={}, WORDS={}, ITEMS=[], CUR=-1, RSEL=false;
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const TK=new URLSearchParams(location.search).get('t')||'';
 async function api(path,opt){opt=Object.assign({},opt);opt.headers=Object.assign({'X-MC-Token':TK},opt.headers||{});const r=await fetch(path,opt);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j}
@@ -158,7 +158,7 @@ async function showResult(){
  if(r.mode&&r.mode!==MODE)return;   // 別の使い方の結果は、ここには出さない
  if(r.status==='error'){$('out').innerHTML=`<div class="err">照合に失敗しました: ${esc(r.msg)}</div>`;return}
  if(r.status!=='done')return;
- const R=r.result.vendors;PAGES=r.result.pages||{};ITEMS=[];
+ const R=r.result.vendors;PAGES=r.result.pages||{};WORDS=r.result.words||{};ITEMS=[];
  const tot={OK:0,OK_IMG:0,DIFF:0,REVIEW:0,NOORDER:0,NOPAIR:0};R.forEach(v=>{for(const k in tot)tot[k]+=(v.count[k]||0)});
  window.CPROWS=[];
  let h=`<div class="chips" id="sum">${chips(tot)}</div><div id="todo" style="margin:4px 0;color:var(--sub)"></div>`+fileSummary(R);
@@ -259,19 +259,36 @@ function pane(el,pid,box,raw,status,nomatch){
  if(nomatch){const c=document.createElement('div');c.className='warn';c.textContent='この書類には、対応する行が見つかりませんでした(書類をそのまま出しています。同じ型式が、別の書き方で書いてないか、探してください)';el.appendChild(c)}
  if(!(pid&&PAGES[pid])){const d=document.createElement('div');d.style.cssText='padding:10px;color:#667385';d.innerHTML=raw?`<div class="raw">${esc(raw)}<br><small>(この書類は画像が無いので、読み取った文字を出しています)</small></div>`:'(この書類に、対応する行はありません)';el.appendChild(d);return}
  const st=el._st,w=document.createElement('div');w.className='pgin';const im=document.createElement('img');im.src=PAGES[pid];w.appendChild(im);el.appendChild(w);
- let b=null;if(box){b=document.createElement('i');b.className='bx '+status;b.style.left=(100*box[0])+'%';b.style.top=(100*box[1])+'%';b.style.width=(100*(box[2]-box[0]))+'%';b.style.height=(100*(box[3]-box[1]))+'%';w.appendChild(b)}
+ el._pid=pid;el.classList.toggle('selmode',RSEL);let b=null;if(box){b=document.createElement('i');b.className='bx '+status;b.style.left=(100*box[0])+'%';b.style.top=(100*box[1])+'%';b.style.width=(100*(box[2]-box[0]))+'%';b.style.height=(100*(box[3]-box[1]))+'%';w.appendChild(b)}
  const apply=()=>{w.style.transform=`translate(${st.x}px,${st.y}px) scale(${st.z})`;w.querySelectorAll('.bx').forEach(x=>x.style.borderWidth=Math.max(1,2/st.z)+'px');showZ()};
  const home=()=>{st.z=1;st.x=0;st.y=0;if(box&&im.clientHeight)st.y=Math.min(0,el.clientHeight/3-box[1]*im.clientHeight);apply()};
  el._home=home;el._zoomAt=(mx,my,f)=>{const nz=Math.max(0.3,Math.min(10,st.z*f));st.x=mx-(mx-st.x)*(nz/st.z);st.y=my-(my-st.y)*(nz/st.z);st.z=nz;apply()};
  im.onload=home;if(im.complete)home();
  el.onwheel=e=>{e.preventDefault();const r=el.getBoundingClientRect();el._zoomAt(e.clientX-r.left,e.clientY-r.top,e.deltaY<0?1.15:1/1.15)};   // マウスのホイールだけで、カーソルの位置を中心に、拡大・縮小
- let drag=null;
- el.onpointerdown=e=>{if(e.button!==0)return;drag={x:e.clientX,y:e.clientY,sx:st.x,sy:st.y};el.setPointerCapture(e.pointerId);el.classList.add('drag')};   // 左クリックを押したまま引っ張ると、動かせる
- el.onpointermove=e=>{if(!drag)return;st.x=drag.sx+(e.clientX-drag.x);st.y=drag.sy+(e.clientY-drag.y);apply()};
- const end=e=>{drag=null;el.classList.remove('drag')};el.onpointerup=end;el.onpointercancel=end;
+ let drag=null,sel=null;
+ const frac=e=>{const r=im.getBoundingClientRect();return[(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height]};
+ el.onpointerdown=e=>{if(e.button!==0)return;
+  if(RSEL||e.shiftKey){const [fx,fy]=frac(e);sel={fx,fy,box:document.createElement('i')};sel.box.className='selbox';w.appendChild(sel.box);el.setPointerCapture(e.pointerId);e.preventDefault();return}   // 範囲コピー: なぞった四角の中の文字を、コピーする
+  drag={x:e.clientX,y:e.clientY,sx:st.x,sy:st.y};el.setPointerCapture(e.pointerId);el.classList.add('drag')};   // 左クリックを押したまま引っ張ると、動かせる
+ el.onpointermove=e=>{if(sel){const [fx,fy]=frac(e);const x0=Math.min(sel.fx,fx),y0=Math.min(sel.fy,fy),x1=Math.max(sel.fx,fx),y1=Math.max(sel.fy,fy);const s=sel.box.style;s.left=(100*x0)+'%';s.top=(100*y0)+'%';s.width=(100*(x1-x0))+'%';s.height=(100*(y1-y0))+'%';sel.r=[x0,y0,x1,y1];return}
+  if(!drag)return;st.x=drag.sx+(e.clientX-drag.x);st.y=drag.sy+(e.clientY-drag.y);apply()};
+ const end=e=>{if(sel){const r=sel.r;setTimeout(()=>{try{sel.box.remove()}catch(_){}},900);sel=null;if(r&&(r[2]-r[0])>0.004&&(r[3]-r[1])>0.002)copyRegion(el._pid,r);return}
+  drag=null;el.classList.remove('drag')};el.onpointerup=end;el.onpointercancel=end;
  el.ondblclick=home;   // ダブルクリックで、元の位置・大きさに戻る
 }
 function showZ(){}
+function copyRegion(pid,r){
+ const W=(WORDS||{})[pid];if(!W||!W.w||!W.w.length){toast('この書類は、文字の位置が取れていないので、範囲コピーできません(表の「1行コピー」を使ってください)');return}
+ const hit=W.w.filter(t=>{const cx=(t[0]+t[2])/2,cy=(t[1]+t[3])/2;return cx>=r[0]&&cx<=r[2]&&cy>=r[1]&&cy<=r[3]});
+ if(!hit.length){toast('その範囲に、文字がありません。もう少し大きく、文字にかけて、なぞってください');return}
+ hit.sort((a,b)=>a[1]-b[1]);const lines=[];
+ for(const t of hit){const h=Math.max(0.004,t[3]-t[1]),L=lines.find(l=>Math.abs(l.y-(t[1]+t[3])/2)<0.6*h);if(L)L.t.push(t);else lines.push({y:(t[1]+t[3])/2,t:[t]})}
+ lines.sort((a,b)=>a.y-b.y);
+ const txt=lines.map(l=>l.t.sort((a,b)=>a[0]-b[0]).map(t=>t[4]).join(' ')).join('\n');
+ copyTxt(txt,'コピーしました: '+(txt.length>40?txt.slice(0,40)+'…':txt).replace(/\n/g,' / ')+(W.ocr?'(画像から読み取った文字です。貼る前に、目で確認してください)':''))
+}
+function setRsel(on){RSEL=!!on;const b=$('rsel');if(b){b.classList.toggle('on',RSEL);b.textContent='📋 範囲コピー: '+(RSEL?'オン(なぞって選ぶ)':'オフ')}document.querySelectorAll('.pg').forEach(p=>p.classList.toggle('selmode',RSEL))}
+$('rsel').onclick=()=>setRsel(!RSEL);
 function zoomBoth(f){['vq','vo'].forEach(id=>{const el=$(id);if(el._zoomAt)el._zoomAt(el.clientWidth/2,el.clientHeight/2,f)})}
 $('zin').onclick=()=>zoomBoth(1.25);$('zout').onclick=()=>zoomBoth(1/1.25);$('zfit').onclick=()=>['vq','vo'].forEach(id=>{const el=$(id);if(el._home)el._home()});
 const ckHtml=cs=>cs?cs.map(c=>`<span class="ck ${c[1]}" title="${esc(c[2]||'')}">${esc(c[0])} ${c[1]==='ok'?'○':(c[1]==='ng'?'✕':'ー')}${c[1]!=='ok'&&c[2]?'('+esc(c[2])+')':''}</span>`).join(''):'';
