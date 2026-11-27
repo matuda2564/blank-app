@@ -63,9 +63,9 @@ def state(mode="qo"):
 def unsupported_msg(ext):
     hint = {".xls": "古い形式のExcelです。Excelで開いて、「名前を付けて保存」から「.xlsx」で保存し直してください",
             ".doc": "Wordの書類は、読めません。PDFにして、入れてください", ".docx": "Wordの書類は、読めません。PDFにして、入れてください",
-            ".heic": "iPhoneのHEIC画像は、読めません。JPEGで保存し直してください", ".csv": "CSVは、読めません。Excel(.xlsx)で保存し直してください",
+            ".heic": "iPhoneのHEIC画像は、読めません。JPEGで保存し直してください", 
             ".zip": "zipは、解凍してから、中のファイルを入れてください"}.get(ext)
-    return f"この形式は、読めません({ext or '拡張子なし'})。" + (hint + "。" if hint else "") + "対応: PDF・Excel(.xlsx)・画像(png / jpg / tif / bmp / webp)"
+    return f"この形式は、読めません({ext or '拡張子なし'})。" + (hint + "。" if hint else "") + "対応: PDF・Excel(.xlsx)・CSV・画像(png / jpg / tif / bmp / webp)"
 
 
 def desktop_dir():

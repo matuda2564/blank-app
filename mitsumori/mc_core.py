@@ -159,7 +159,7 @@ def to_num(s):
 HDR = {
     "model": ("型式", "品番", "型番", "規格"),
     "name": ("品名", "商品名", "名称", "品目", "摘要"),
-    "qty": ("数量",),
+    "qty": ("数量", "個数"),
     "unit": ("単位",),
     "price": ("単価",),
     "amount": ("金額",),
@@ -228,7 +228,7 @@ def _has_any(nt, words):
 def find_header(lines):
     for i, l in enumerate(lines):
         t = "".join(VARIANT.get(ch, ch) for ch in norm(l["text"]))
-        if "数量" in t and (_has_any(t, HDR["model"]) or _has_any(t, HDR["name"])):
+        if ("数量" in t or "個数" in t) and (_has_any(t, HDR["model"]) or _has_any(t, HDR["name"])):
             return i
     return None
 
@@ -544,6 +544,8 @@ def read_doc(path, role, cancel=None):
     try:
         if ext in (".xlsx", ".xlsm"):
             read_excel(d)
+        elif ext == ".csv":
+            read_csv(d)
         elif ext == ".pdf":
             pdf = fitz.open(path)
             npages = len(pdf)
@@ -651,12 +653,36 @@ def read_excel(d):
         if k >= 5000:
             d.notes.append("行が多すぎるので、先頭5,000行だけ読みました(残りは読んでいません。目視で確認してください)"); break
         grid.append([("" if c is None else str(c)) for c in row])
+    _read_grid(d, grid)
+
+
+def read_csv(d):
+    """CSV(カンマ・タブ・セミコロン区切り。文字コードは UTF-8 / Shift_JIS(CP932) を自動で判別)を、Excelと同じ『表』として読む"""
+    import csv
+    raw = open(d.path, "rb").read()
+    text = None
+    for enc in ("utf-8-sig", "cp932", "utf-16"):
+        try: text = raw.decode(enc); break
+        except Exception: continue
+    if text is None: text = raw.decode("utf-8", "replace"); d.notes.append("文字コードを判別できなかったので、文字化けがあるかもしれません")
+    d.kind = "CSV"; d.src = "excel"
+    head = text[:4000]
+    delim = max((",", "\t", ";"), key=lambda c: head.count(c))
+    grid = []
+    for k, row in enumerate(csv.reader(text.splitlines(), delimiter=delim)):
+        if k >= 5000:
+            d.notes.append("行が多すぎるので、先頭5,000行だけ読みました(残りは読んでいません。目視で確認してください)"); break
+        grid.append([c.strip() for c in row])
+    _read_grid(d, grid)
+
+
+def _read_grid(d, grid):
     d.text = "\n".join(" ".join(r) for r in grid)
     d.lines = [{"page": 0, "text": " ".join(r), "src": "excel"} for r in grid if any(r)]
     hi = None
     for i, r in enumerate(grid):
         t = norm("".join(r))
-        if "数量" in t and (_has_any(t, HDR["model"]) or _has_any(t, HDR["name"])):
+        if ("数量" in t or "個数" in t) and (_has_any(t, HDR["model"]) or _has_any(t, HDR["name"])):
             hi = i; break
     if hi is None:
         d.notes.append("見出し行が見つからない"); return
@@ -1257,7 +1283,7 @@ def page_jpeg_b64(doc, pno, maxw=1000):
 
 # ------------------------------------------------------------------ 1社ぶん・全社ぶん
 IMG_EXTS = (".png", ".jpg", ".jpeg", ".jfif", ".webp", ".tif", ".tiff", ".bmp")
-EXTS = (".pdf", ".xlsx", ".xlsm") + IMG_EXTS
+EXTS = (".pdf", ".xlsx", ".xlsm", ".csv") + IMG_EXTS
 
 
 def _read_job(args, cancel=None):

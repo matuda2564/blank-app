@@ -131,7 +131,7 @@ function render(){
  }
  $('slots').innerHTML=h;
  document.querySelectorAll('.dz').forEach(z=>{
-  z.onclick=()=>{if(ST.job.status==='running')return;const i=document.createElement('input');i.type='file';i.multiple=true;i.style.display='none';i.accept='.pdf,.xlsx,.xlsm,.png,.jpg,.jpeg,.jfif,.webp,.tif,.tiff,.bmp';document.body.appendChild(i);i.onchange=()=>{up(z.dataset.slot,z.dataset.role,[...i.files]).then(()=>i.remove())};i.click()};
+  z.onclick=()=>{if(ST.job.status==='running')return;const i=document.createElement('input');i.type='file';i.multiple=true;i.style.display='none';i.accept='.pdf,.xlsx,.xlsm,.csv,.png,.jpg,.jpeg,.jfif,.webp,.tif,.tiff,.bmp';document.body.appendChild(i);i.onchange=()=>{up(z.dataset.slot,z.dataset.role,[...i.files]).then(()=>i.remove())};i.click()};
   z.ondragover=e=>{e.preventDefault();z.classList.add('over')};z.ondragleave=()=>z.classList.remove('over');
   z.ondrop=e=>{e.preventDefault();z.classList.remove('over');if(ST.job.status!=='running')up(z.dataset.slot,z.dataset.role,e.dataTransfer.files)};
  });
