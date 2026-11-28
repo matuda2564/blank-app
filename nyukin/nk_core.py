@@ -332,3 +332,73 @@ def search(docs, query):
             for di, ri, r, n in hits]
     rows.sort(key=lambda r: (r["date"], r["file"]))
     return {"groups": glist, "rows": rows, "query": query}
+
+
+# ---------------------------------------------------------------- お客さんの一覧(登録・貼り付け)
+PRIMARY_SEP = re.compile(r"[\r\n\t、，,;；]+")
+
+
+def parse_names(text):
+    """お客さんの一覧の文字を、1人ずつに分ける。
+    区切り: 改行・タブ(Excelの列/行を貼り付けた形)・読点(、)・カンマ・セミコロン。
+    ただし、これらの区切りが1つも無い『1行に空白で並べた形』のときだけ、空白(全角も)でも区切る
+    (名前の中に空白がある人は、改行か、読点で区切ってください)。
+    1人分の中に『=』があれば、『表示名=別の書き方=もう1つの書き方』として、どれで探してもよい(例: 京セラ=キョウセラ=ｷﾖｳｾﾗ)。
+    戻り: [{'name': 表示名, 'keys': [探すための、そろえた文字], 'raw': [書いた文字]}]"""
+    t = (text or "").replace("\ufeff", "")
+    parts = [p.strip() for p in PRIMARY_SEP.split(t) if p.strip()]
+    if len(parts) == 1 and re.search(r"[\s\u3000]", parts[0]) and "=" not in parts[0] and "＝" not in parts[0]:
+        parts = [p for p in re.split(r"[\s\u3000]+", parts[0]) if p]
+    out, seen = [], set()
+    for p in parts:
+        alts = [a.strip().strip("\"'「」『』") for a in re.split(r"[=＝]", p) if a.strip()]
+        if not alts: continue
+        keys = []
+        for a in alts:
+            k = norm_name(a)
+            if k and k not in keys: keys.append(k)
+        if not keys: continue
+        sig = tuple(sorted(keys))
+        if sig in seen: continue
+        seen.add(sig)
+        out.append({"name": alts[0], "keys": keys, "raw": alts, "short": any(len(k) < 2 for k in keys)})
+    return out
+
+
+def search_many(docs, entries):
+    """お客さん(登録の人・貼り付けた人)を、まとめて探す。戻り: お客さんごとの、日付・名義・入金・出金の一覧と合計。見つからなかった人と、2人以上に当たった行も、知らせる"""
+    rows = []
+    for di, d in enumerate(docs):
+        for ri, r in enumerate(d["rows"]):
+            n = norm_name(r["desc"])
+            if n: rows.append((di, ri, r, n))
+    custs, hit_by = [], collections.defaultdict(list)
+    for ci, e in enumerate(entries):
+        keys = e["keys"]
+        mine = [(di, ri, r, n) for di, ri, r, n in rows if any(k in n for k in keys)]
+        names = collections.Counter(r["desc"] for _, _, r, _ in mine)
+        crow = []
+        for di, ri, r, n in mine:
+            hit_by[(di, ri)].append(ci)
+            crow.append({"doc": di, "i": ri, "date": r["date"], "desc": r["desc"], "in": r["in"], "out": r["out"], "chk": r.get("chk", "na"), "file": docs[di]["name"], "page": r["page"],
+                         "box": ([round(x, 4) for x in r["bbox"]] if r.get("bbox") else None), "raw": r.get("raw", "")})
+        crow.sort(key=lambda x: (x["date"], x["file"]))
+        custs.append({"name": e["name"], "keys": keys, "count": len(crow), "in": sum(x["in"] or 0 for x in crow), "out": sum(x["out"] or 0 for x in crow),
+                      "variants": [n for n, _ in names.most_common(6)], "rows": crow, "short": bool(e.get("short"))})
+    multi = [{"doc": di, "i": ri, "desc": docs[di]["rows"][ri]["desc"], "date": docs[di]["rows"][ri]["date"], "who": [custs[c]["name"] for c in cs]} for (di, ri), cs in hit_by.items() if len(cs) > 1]
+    uniq = {k for k in hit_by}
+    tin = sum(docs[di]["rows"][ri]["in"] or 0 for di, ri in uniq); tout = sum(docs[di]["rows"][ri]["out"] or 0 for di, ri in uniq)
+    return {"customers": custs, "not_found": [c["name"] for c in custs if not c["count"]], "multi": multi, "in": tin, "out": tout, "count": len(uniq), "total_rows": len(rows)}
+
+
+def csv_text(result):
+    """まとめて探した結果を、CSVの文字にする(お客さんごとの明細 + お客さん別の合計)"""
+    import csv, io
+    buf = io.StringIO(); w = csv.writer(buf, lineterminator="\r\n")
+    w.writerow(["お客さん", "日付", "名義(銀行の書き方)", "入金", "出金", "ファイル"])
+    for c in result["customers"]:
+        for r in c["rows"]: w.writerow([c["name"], r["date"], r["desc"], r["in"] if r["in"] is not None else "", r["out"] if r["out"] is not None else "", r["file"]])
+    w.writerow([]); w.writerow(["お客さん別の合計", "件数", "", "入金の合計", "出金の合計", ""])
+    for c in result["customers"]: w.writerow([c["name"], c["count"], "", c["in"], c["out"], "見つからなかった" if not c["count"] else ""])
+    w.writerow(["全体(重複なし)", result["count"], "", result["in"], result["out"], ""])
+    return buf.getvalue()
