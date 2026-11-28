@@ -189,3 +189,21 @@ def _from_grid(d):
                "unit": None, "problems": [], "page": 0, "src": "excel", "exact": True, "raw": " | ".join(r), "cell": f"{i}行目"}
         rows.append(row)
     return rows or None
+
+
+def stated_total(d):
+    """書類の見出しに書いてある『当月検収額』(京セラの検収明細表)。読み取った行の金額の合計と突き合わせて、読み取りが足りているかを確かめる。無ければ None"""
+    txt = _nf(getattr(d, "text", "") or "")
+    m = re.search(r"当月検収額\s*([\d][\d,\s]*\.?\s*\d*)", txt)
+    if not m: return None
+    return num(re.sub(r"\s", "", m.group(1)))
+
+
+def read_check(d, rows):
+    """読み取りの確認。(状態, 文) を返す。状態: ok / ng / none(確かめる材料が無い)"""
+    tot = stated_total(d)
+    if tot is None or not rows: return "none", ""
+    got = sum((r.get("amount") or 0) for r in rows)
+    if abs(got - tot) < 1:
+        return "ok", f"読み取った{len(rows)}行の金額の合計 {got:,.0f}円 = 書類の『当月検収額』{tot:,.0f}円 で一致(読み取りは足りています)"
+    return "ng", f"読み取った{len(rows)}行の金額の合計 {got:,.0f}円 ≠ 書類の『当月検収額』{tot:,.0f}円(差 {tot - got:,.0f}円)。読み取れていない行がある可能性があります。このあとの『京セラに無い』は、読み取り漏れかもしれません"

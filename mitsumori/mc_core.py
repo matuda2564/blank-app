@@ -1373,6 +1373,11 @@ def run_vendor(vdir, workers=4, progress=None, name=None, mode="qo", with_qty=Fa
                 if kr:
                     d.rows = kr; d.total = None; done_ks = True
                     d.notes = [n for n in d.notes if "見出し行" not in n] + [f"注文番号で{len(kr)}行を読み取りました"]
+                    st, msg = ks_rows.read_check(d, kr)   # 読み取りの確認: 書類に書いてある合計と、読み取った金額の合計を、突き合わせる
+                    if st == "ok": d.notes.append(msg)
+                    elif st == "ng": out["warnings"].append(f"「{d.name}」: " + msg); d.notes.append(msg)
+                elif d.role == roles[2] or "注文" in (d.text or "")[:3000]:
+                    out["warnings"].append(f"「{d.name}」から、注文番号つきの行を読み取れませんでした(0行)。この書類について出る『無い』は、読み取れていないだけです。書類の書式を教えてください")
             except Exception as e: log(f"ks_rows失敗 {d.name}: {e!r}")
         if not done_ks:
             try: apply_item_rows(d)   # 見積⇔発注も、見積⇔見積も、表の列の位置から、型式・品名・個数を読む

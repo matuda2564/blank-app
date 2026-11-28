@@ -62,3 +62,13 @@ assert len(ok) == 9 + 2, (len(ok), [(r["model"], r["status"], r["msg"][:30]) for
 assert sum(1 for r in allr if r["status"] != "OK") == 4, [(r["model"], r["status"]) for r in allr]
 shutil.rmtree(tmp, ignore_errors=True)
 print("ks_rows real-layout OK")
+
+# 読み取りの確認(書類の『当月検収額』と、読み取った金額の合計の突き合わせ)
+import gen_ks3
+tmp = tempfile.mkdtemp(); os.environ["MC_WORK"] = tmp
+gen_ks3.make_kyo3(os.path.join(tmp, "k.pdf"))
+dk = C.read_doc(os.path.join(tmp, "k.pdf"), "京セラ請求書"); rk = ks_rows.extract(dk)
+st, msg = ks_rows.read_check(dk, rk); assert st == "ok", (st, msg, ks_rows.stated_total(dk))
+st, msg = ks_rows.read_check(dk, rk[:-2]); assert st == "ng" and "差" in msg, (st, msg)   # 2行 読み漏らしたら、警告
+shutil.rmtree(tmp, ignore_errors=True)
+print("ks_rows read-check OK")
