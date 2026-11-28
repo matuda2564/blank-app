@@ -21,7 +21,7 @@ tr.ng td{background:#fff3f3}.tot{display:flex;gap:22px;flex-wrap:wrap;margin:8px
 .small{color:var(--sub);font-size:13px}
 </style></head><body>
 <header><h1>入金確認 <small class="small" id="ver"></small></h1><span class="sp"></span><span id="loaded" class="small"></span>
-<button class="danger" id="reset" title="読み込んだPDFと、読み取った中身を、全部消します">データを消して、次の月へ</button></header>
+<button class="danger" id="reset" title="読み込んだPDF/CSVと、読み取った中身を、全部消します(登録のお客さんの一覧は、消えません)">データを消して、次の月へ</button></header>
 <main>
 <div class="card" id="c1"><h2>① 銀行の入出金リスト(CSVかPDF)を入れて、「読み込む」</h2>
 <div class="dz" id="dz">ここにCSVかPDFをドラッグ、またはクリックして選ぶ(<b>CSVのほうが確実</b>です。3店舗ぶんを、まとめて入れても構いません)</div>
@@ -33,6 +33,19 @@ tr.ng td{background:#fff3f3}.tot{display:flex;gap:22px;flex-wrap:wrap;margin:8px
 <div class="sr"><input id="q" placeholder="名前を入れて Enter(例: キョウセラ)" autocomplete="off"><button class="pri" id="go">探す</button></div>
 <div class="small" style="margin-top:4px">銀行の名義は、<b>カタカナ</b>のことが多いです(漢字では見つからないことがあります)。全角・半角、ひらがな・カタカナ、「(カ」「カ)」「株式会社」の違いは、そろえて探します。複数の名前は、空白で区切ると、どれかに当たれば出ます。</div>
 <div id="res"></div></div>
+<div class="card" id="c3"><h2>③ お客さんを、まとめて探す</h2>
+<div class="small" style="margin-bottom:8px">入出金リストを読み込んだあと、<b>登録のお客さん全員</b>、または<b>貼り付けたお客さん</b>の、日付・名義・入金・出金と合計を、一度に出します。</div>
+<details id="regbox" open><summary><b>登録のお客さん</b> <span id="regcnt" class="small"></span>(アプリに覚えておく名前の一覧。<b>「データを消して、次の月へ」では、消えません</b>)</summary>
+<textarea id="regtxt" rows="6" style="width:100%;margin-top:6px;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px" placeholder="1人ずつ改行して書く(Excelの列を、そのまま貼り付けてもOK)。例:&#10;キョウセラ&#10;ヤマダデンキ&#10;京セラ=キョウセラ=ｷﾖｳｾﾗ"></textarea>
+<div id="regprev" class="small" style="margin:4px 0"></div>
+<button id="regsave" class="pri">この内容で登録する(今の一覧を、置き換え)</button> <button id="regclear" class="danger">登録を全部消す</button> <span class="small" id="regmsg"></span></details>
+<div style="margin:10px 0"><button id="runreg" class="pri" style="font-size:16px;padding:9px 20px">登録のお客さん全員の入金を出す</button></div>
+<details id="pastebox" open><summary><b>登録していないお客さん</b>(その場で貼り付けて、まとめて出す)</summary>
+<textarea id="pastetxt" rows="4" style="width:100%;margin-top:6px;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px" placeholder="名前を貼り付ける(Excelの列・行をそのまま、または、手で打つ)"></textarea>
+<div id="pasteprev" class="small" style="margin:4px 0"></div>
+<button id="runpaste" class="pri">この人たちの入金を出す</button></details>
+<div class="small" style="margin-top:8px;line-height:1.7"><b>名前の区切り方</b>: ①<b>1人ずつ改行</b>(Excelの列を貼り付けた形)/ ②<b>タブ</b>(Excelの行を貼り付けた形)/ ③<b>読点(、)・カンマ(,)・セミコロン</b> / ④<b>1行に並べるときは、空白</b>(半角・全角どちらも)でもOK。<br>名前の中に空白がある人(例: ヤマダ タロウ)は、①か③で区切ってください(空白で並べると、2人に分かれます)。分けた結果は、上の「○人に分けました」で、確認できます。<br>同じお客さんの<b>別の書き方</b>は、<b>=でつなぎます</b>(例: <b>京セラ=キョウセラ=ｷﾖｳｾﾗ</b>)。銀行の名義は、カタカナのことが多いです。</div>
+<div id="bres"></div></div>
 </main>
 <div class="vw" id="vw" hidden><div class="vb"><div style="display:flex;gap:10px;align-items:center;margin-bottom:6px"><b id="vt"></b><span class="sp"></span><button id="vx">✕ 閉じる</button></div><img id="vi" style="max-width:90vw"></div></div>
 <div id="toast"></div>
@@ -68,6 +81,7 @@ function render(){
  }
  $('status').innerHTML=h;
  const ready=ST.total_rows>0&&!run;$('q').disabled=!ready;$('go').disabled=!ready;
+ try{renderBtns()}catch(e){}
  $('loaded').textContent=docs.length?`いま読み込んでいるのは: ${docs.map(d=>d.name).join('、')}(${ST.total_rows}行)`:'読み込んだデータは、ありません';
 }
 async function up(files){
@@ -82,7 +96,7 @@ async function rm(n){await api('/api/remove?name='+encodeURIComponent(n),{method
 $('load').onclick=async()=>{try{await api('/api/load',{method:'POST'});RES=null;$('res').innerHTML='';poll()}catch(e){toast(e.message)}};
 $('cancel').onclick=async()=>{await api('/api/cancel',{method:'POST'});refresh()};
 async function poll(){for(;;){await refresh();if(ST.job.status!=='running')break;await new Promise(r=>setTimeout(r,600))}}
-$('reset').onclick=async()=>{if(!confirm('読み込んだPDFと、読み取った中身を、全部消します(次の月の準備です)。よろしいですか?'))return;await api('/api/reset',{method:'POST'});RES=null;$('res').innerHTML='';$('q').value='';refresh();toast('消しました。次の月のPDFを入れてください')};
+$('reset').onclick=async()=>{if(!confirm('読み込んだPDF/CSVと、読み取った中身を、全部消します(次の月の準備です)。登録のお客さんの一覧は、消えません。よろしいですか?'))return;await api('/api/reset',{method:'POST'});RES=null;$('res').innerHTML='';$('q').value='';refresh();toast('消しました。次の月のPDFを入れてください')};
 $('go').onclick=search;$('q').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();search()}};
 async function search(){const q=$('q').value.trim();if(!q)return;try{RES=await api('/api/search?q='+encodeURIComponent(q));RES.sel=new Set(RES.groups.map(g=>g.id));showRes()}catch(e){toast(e.message)}}
 function colsUi(d){
@@ -114,5 +128,30 @@ function showPage(doc,i,p){
  const d=ST.docs[doc];const r=(RES.rows||[]).find(x=>x.doc===doc&&x.i===i);$('vt').textContent=`${d.name}・${p}ページ(赤い枠が、この行)`;
  $('vi').src='/api/page?doc='+doc+'&p='+p+'&t='+encodeURIComponent(TK)+'&box='+encodeURIComponent(r&&r.box?r.box.join(','):'');$('vw').hidden=false}
 $('vx').onclick=()=>$('vw').hidden=true;$('vw').onclick=e=>{if(e.target===$('vw'))$('vw').hidden=true};
-refresh();setInterval(()=>{if(!ST||ST.job.status!=='running')refresh()},5000);
+
+// ---- お客さんを、まとめて探す
+let REG=[],BR=null;
+function chips(es){return es.length?`<b>${es.length}人</b>に分けました: `+es.map(e=>`<span class="chip">${esc(e.name)}${e.keys.length>1?' (別の書き方'+(e.keys.length-1)+')':''}${e.short?' ⚠短い':''}</span>`).join(''):'(まだ、名前が入っていません)'}
+let _pt=0;function prev(txtId,outId){clearTimeout(_pt);_pt=setTimeout(async()=>{const t=$(txtId).value;if(!t.trim()){$(outId).textContent='';return}try{const r=await api('/api/parsenames',{method:'POST',body:t});$(outId).innerHTML=chips(r.entries)}catch(e){}},250)}
+$('regtxt').oninput=()=>prev('regtxt','regprev');$('pastetxt').oninput=()=>prev('pastetxt','pasteprev');
+async function loadReg(){try{const r=await api('/api/customers');REG=r.entries;$('regcnt').textContent=`(いま ${REG.length}人)`;if(document.activeElement!==$('regtxt'))$('regtxt').value=REG.map(e=>e.raw.join('=')).join('\n');$('regprev').innerHTML=REG.length?chips(REG):'';renderBtns()}catch(e){}}
+function renderBtns(){const ready=ST&&ST.total_rows>0&&!(ST.job.status==='running');$('runreg').disabled=!ready||!REG.length;$('runpaste').disabled=!ready}
+$('regsave').onclick=async()=>{try{const r=await api('/api/customers',{method:'POST',body:$('regtxt').value});REG=r.entries;$('regmsg').textContent=`${REG.length}人を登録しました`;await loadReg();toast(`${REG.length}人を登録しました(次の月も、残ります)`)}catch(e){toast(e.message)}};
+$('regclear').onclick=async()=>{if(!confirm('登録のお客さんの一覧を、全部消します。よろしいですか?'))return;await api('/api/customers_clear',{method:'POST'});$('regtxt').value='';$('regprev').textContent='';await loadReg()};
+$('runreg').onclick=()=>runBatch('registered');$('runpaste').onclick=()=>runBatch('pasted');
+async function runBatch(who){try{BR=await api('/api/batch?who='+who,{method:'POST',body:who==='pasted'?$('pastetxt').value:''});showBatch()}catch(e){toast(e.message)}}
+function showBatch(){
+ const B=BR;let h=`<h3 style="margin:14px 0 4px;font-size:15px">結果</h3><div class="tot"><span>お客さん <b>${B.customers.length}</b>人</span><span>該当 <b>${B.count}</b>件</span><span>入金の合計 <b>${yen(B.in)}</b>円</span>${B.out?`<span>出金の合計 <b>${yen(B.out)}</b>円</span>`:''}</div>`;
+ if(B.not_found.length)h+=`<div class="warn">見つからなかったお客さん(${B.not_found.length}人): ${B.not_found.map(esc).join('、')}<br><small>銀行の名義はカタカナのことが多いので、<b>漢字だと見つかりません</b>。「京セラ=キョウセラ」のように、別の書き方を足してください。</small></div>`;
+ if(B.multi.length)h+=`<div class="warn">2人以上のお客さんに当たった行が ${B.multi.length}行 あります(全体の合計には、1回だけ入れています): ${B.multi.slice(0,5).map(m=>esc(m.date+' '+m.desc+' → '+m.who.join('・'))).join(' / ')}${B.multi.length>5?' …':''}</div>`;
+ const short=B.customers.filter(c=>c.short&&c.count);if(short.length)h+=`<div class="warn">名前が短いお客さん(${short.map(c=>esc(c.name)).join('、')})は、別の人も拾っていないか、名義を見て確認してください。</div>`;
+ h+=`<div style="margin:6px 0"><button class="pri" onclick="cpBatch()">一覧をコピー(Excelに貼れます)</button> <button class="pri" onclick="saveCsv()">CSVで保存(デスクトップへ)</button> <button onclick="cpBatchTot()">お客さん別の合計だけコピー</button></div>`;
+ h+='<table><tr><th>お客さん</th><th>件数</th><th>入金の合計</th><th>出金の合計</th></tr>'+B.customers.map(c=>`<tr><td>${esc(c.name)}</td><td class="n">${c.count}</td><td class="n">${yen(c.in)}</td><td class="n">${yen(c.out)}</td></tr>`).join('')+'</table>';
+ h+=B.customers.filter(c=>c.count).map(c=>`<details style="margin:8px 0" ${B.customers.length<=3?'open':''}><summary><b>${esc(c.name)}</b> <span class="small">${c.count}件・入金 ${yen(c.in)}円${c.out?`・出金 ${yen(c.out)}円`:''}${c.variants.length?`(名義: ${c.variants.slice(0,3).map(esc).join(' / ')})`:''}</span></summary><table><tr><th>日付</th><th>名義</th><th>入金</th><th>出金</th><th>検算</th><th>元</th></tr>${c.rows.map(r=>`<tr class="${r.chk==='ng'?'ng':''}"><td>${r.date}</td><td>${esc(r.desc)}</td><td class="n">${yen(r.in)}</td><td class="n">${yen(r.out)}</td><td>${r.chk==='ok'?'○':r.chk==='ng'?'✕':'−'}</td><td>${r.page?`<button class="sm" onclick="showPage2(${r.doc},${r.page},'${(r.box||[]).join(',')}')">${r.page}ページ</button>`:`<button class="sm" onclick="toast('CSVの元の行: '+decodeURIComponent('${encodeURIComponent(r.raw||'')}'))">行</button>`}</td></tr>`).join('')}</table></details>`).join('');
+ $('bres').innerHTML=h}
+function showPage2(doc,p,box){const d=ST.docs[doc];$('vt').textContent=`${d.name}・${p}ページ(赤い枠が、この行)`;$('vi').src='/api/page?doc='+doc+'&p='+p+'&t='+encodeURIComponent(TK)+'&box='+encodeURIComponent(box||'');$('vw').hidden=false}
+function cpBatch(){const B=BR,L=['お客さん\t日付\t名義\t入金\t出金'];B.customers.forEach(c=>{c.rows.forEach(r=>L.push([c.name,r.date,r.desc,r.in==null?'':r.in,r.out==null?'':r.out].join('\t')));L.push([c.name+' 合計',c.count+'件','',c.in,c.out].join('\t'))});L.push(['全体(重複なし)',B.count+'件','',B.in,B.out].join('\t'));copyTxt(L.join('\n'),`${B.count}件と合計をコピーしました(Excelに貼れます)`)}
+function cpBatchTot(){const B=BR;copyTxt(['お客さん\t件数\t入金の合計\t出金の合計'].concat(B.customers.map(c=>[c.name,c.count,c.in,c.out].join('\t'))).join('\n'),'お客さん別の合計をコピーしました')}
+async function saveCsv(){try{const r=await api('/api/savecsv',{method:'POST'});toast('デスクトップに保存しました: '+r.path.split(/[\\/]/).pop());alert('デスクトップに保存しました:\n'+r.path)}catch(e){toast(e.message)}}
+loadReg();refresh().then(renderBtns);setInterval(()=>{if(!ST||ST.job.status!=='running')refresh().then(renderBtns)},5000);
 </script></body></html>
