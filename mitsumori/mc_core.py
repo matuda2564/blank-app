@@ -677,6 +677,7 @@ def read_csv(d):
 
 
 def _read_grid(d, grid):
+    d.grid = grid   # 京セラ用(注文番号で読む)が、表をそのまま使う
     d.text = "\n".join(" ".join(r) for r in grid)
     d.lines = [{"page": 0, "text": " ".join(r), "src": "excel"} for r in grid if any(r)]
     hi = None
@@ -1364,8 +1365,18 @@ def run_vendor(vdir, workers=4, progress=None, name=None, mode="qo", with_qty=Fa
                 out["warnings"].append(f"{d.role}フォルダの「{d.name}」は、中身が「{k}」と読める。入れる場所を間違えていないか確認してください" + ("(見積同士を比べるときは、上の「見積 ⇔ 見積」のタブを使います)" if k == "見積" and d.role == "発注" else ""))
         elif k == "発注":
             out["warnings"].append(f"{d.role}フォルダの「{d.name}」は、中身が「発注書」と読める。見積書を入れる場所です。間違えていないか確認してください")
-        try: apply_item_rows(d)   # 見積⇔発注も、見積⇔見積も、表の列の位置から、型式・品名・個数を読む
-        except Exception as e: log(f"apply_item_rows失敗 {d.name}: {e!r}")
+        done_ks = False
+        if mode == "ks":   # 京セラ: 型番の列が無いので、『注文番号』を鍵にして、行を読む(読めなければ、従来の型番の読み方に戻す)
+            try:
+                import ks_rows
+                kr = ks_rows.extract(d)
+                if kr:
+                    d.rows = kr; d.total = None; done_ks = True
+                    d.notes = [n for n in d.notes if "見出し行" not in n] + [f"注文番号で{len(kr)}行を読み取りました"]
+            except Exception as e: log(f"ks_rows失敗 {d.name}: {e!r}")
+        if not done_ks:
+            try: apply_item_rows(d)   # 見積⇔発注も、見積⇔見積も、表の列の位置から、型式・品名・個数を読む
+            except Exception as e: log(f"apply_item_rows失敗 {d.name}: {e!r}")
         docs[d.role].append(d)
     out["seconds"] = sum(d.seconds for r in docs.values() for d in r)
     if mode == "ks":   # 京セラ: 3種類の書類の、どの2つも、型式・品名・個数・単価・金額を、行ごとに比べる

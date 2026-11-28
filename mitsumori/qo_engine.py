@@ -119,7 +119,7 @@ def line_edges(ctx, q, o):
             sq, sp_ = _squash(qr.get("left")), _squash(pr.get("left"))
             if kq and kp and kq == kp: sc, kind = 100, "exact"
             elif (kq and len(kq) >= 6 and kq in sp_ and kq != kp) or (kp and len(kp) >= 6 and kp in sq and kq != kp): sc, kind = 92, "spaced"   # 空白・区切りが違うだけ(sy5120 5lzd 01)
-            elif kq and kp and min(len(kq), len(kp)) >= 6 and C.lev(kq, kp) <= 2: sc, kind = 55 + 5 * va, "near"
+            elif kq and kp and min(len(kq), len(kp)) >= 6 and C.lev(kq, kp) <= 2 and ctx.mode != "ks": sc, kind = 55 + 5 * va, "near"   # 注文番号(京セラ)は、1〜2桁違いを、同じとみなさない
             elif (not kq or not kp):
                 ns = name_sim(qr.get("name"), pr.get("name"))
                 if ns is not None and ns >= 0.7: sc, kind = 30 + 20 * ns + 5 * va, "name"
@@ -235,6 +235,7 @@ def row_result(ctx, q, o, qr, pr, kind, extra=None):
     unv = qr.get("unverified") or pr.get("unverified")
     probs = list(qr.get("problems", [])) + list(pr.get("problems", []))
     label = (qr.get("model_raw") or pr.get("model_raw") or qr.get("name") or pr.get("name") or "(型番なし)")[:22]
+    if ctx.mode == "ks": label = f"{qr.get('model_raw') or pr.get('model_raw')} {(qr.get('name') or pr.get('name') or '')[:14]}".strip()   # 京セラ: 注文番号と品名の頭
     name_ng = ns is not None and ns < NAME_NG
     name_msg = f"品名が違う可能性: 見積「{(qr.get('name') or '')[:24]}」⇔ 発注書「{(pr.get('name') or '')[:24]}」" if name_ng else ""
     qty_note = f"個数が違う(参考): 客先 {va:,} / 仕入先 {vb:,}" if (qty_ref and va is not None and vb is not None and va != vb) else ""
@@ -314,6 +315,7 @@ def build(quotes, orders, mode="qo", labels=None):
         for pi, pr in enumerate(o.rows):
             if (id(o), pi) in pline: continue
             label = (pr.get("model_raw") or pr.get("name") or "(型番なし)")[:22]
+            if mode == "ks": label = f"{pr.get('model_raw') or ''} {(pr.get('name') or '')[:14]}".strip()
             ocr = o.src == "ocr"
             res = {"status": "REVIEW" if (ocr or pr.get("problems")) else "DIFF", "model": label, "msg": tr("発注書にだけある品目(見積に無い)。", qq, LB) + ("画像の読み取りが確実でないので、断定しない" if ocr else ("どちらが正しいか、目で確認してください" if mode == "ks" else f"{LB[0]}に無い品目です。{LB[1]}に余分な品目が入っていないか、確認してください" if qq else "新しく加わった品目か、別の見積の品目か、確認してください")), "qrow": None, "orow": pr}
             if po: pairs[(po, id(o))]["results"].append(res)
@@ -324,6 +326,7 @@ def build(quotes, orders, mode="qo", labels=None):
         for qi, qr in enumerate(q.rows):
             if (id(q), qi) in qline or (id(q), qi) in split: continue
             label = (qr.get("model_raw") or qr.get("name") or "(型番なし)")[:22]
+            if mode == "ks": label = f"{qr.get('model_raw') or ''} {(qr.get('name') or '')[:14]}".strip()
             if qq: pairs[(id(q), mo)]["results"].append({"status": "REVIEW" if q.src == "ocr" else "DIFF", "model": label, "msg": f"{LB[0]}にだけある品目({LB[1]}に無い)。" + ("どちらが正しいか、目で確認してください" if mode == "ks" else "仕入先に、頼む(見積をもらう)必要がある品目か、確認してください") + ("(画像の読み取りが確実でないので、断定しない)" if q.src == "ocr" else ""), "qrow": qr, "orow": None})
             else: pairs[(id(q), mo)]["results"].append({"status": "NOORDER", "model": label, "msg": "見積にあるが、発注書に無い品目(個数減・見送りの可能性。発注されなかった品目です)", "qrow": qr, "orow": None})
     out = []
@@ -332,7 +335,7 @@ def build(quotes, orders, mode="qo", labels=None):
         n = len(link[(dq, do)])
         others_q = [byid[x[1]].name for x in link if x[0] == dq and x[1] != do]
         others_o = [byid[x[0]].name for x in link if x[1] == do and x[0] != dq]
-        why = f"{n}行が、ひもづいた。根拠: " + (" / ".join(pdt["ev"]) if pdt["ev"] else "型番が一致") if n else "1枚ずつなので、そのまま組にした(型番が重なる行は、見つかりませんでした)。" + f"左の書類: {_samp(q)} ／ 右の書類: {_samp(o)}"
+        why = f"{n}行が、ひもづいた。根拠: " + (" / ".join(pdt["ev"]) if pdt["ev"] else ("注文番号が一致" if mode == "ks" else "型番が一致")) if n else "1枚ずつなので、そのまま組にした(型番が重なる行は、見つかりませんでした)。" + f"左の書類: {_samp(q)} ／ 右の書類: {_samp(o)}"
         if others_o: why += tr(f"。★この発注書は、ほかの見積(「{'」「'.join(others_o)}」)の品目も、含んでいる", qq, LB)
         if others_q: why += tr(f"。★この見積は、ほかの発注書(「{'」「'.join(others_q)}」)にも、分かれている", qq, LB)
         if mode == "ks": cmp_, skp_ = ["型式", "品名", "個数", "単価", "金額"], []
