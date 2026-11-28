@@ -262,6 +262,14 @@ def row_result(ctx, q, o, qr, pr, kind, extra=None):
     return res("OK_IMG" if ocr else "OK", "")
 
 
+def _samp(d, n=4):
+    """読み取った型番の例(組にならなかったとき、なぜか、見て分かるように)"""
+    rows = getattr(d, "rows", None) or []
+    if not rows: return "(行を読み取れませんでした)"
+    ks = [(r.get("model_raw") or r.get("name") or "(型番なし)")[:18] for r in rows[:n]]
+    return f"{len(rows)}行を読み取り。例: " + " / ".join(ks)
+
+
 def build(quotes, orders, mode="qo", labels=None):
     """戻り: [(見積|None, 発注書|None, 理由, 結果の一覧, 比べた項目, 比べなかった項目)]"""
     if not quotes and not orders: return []
@@ -324,7 +332,7 @@ def build(quotes, orders, mode="qo", labels=None):
         n = len(link[(dq, do)])
         others_q = [byid[x[1]].name for x in link if x[0] == dq and x[1] != do]
         others_o = [byid[x[0]].name for x in link if x[1] == do and x[0] != dq]
-        why = f"{n}行が、ひもづいた。根拠: " + (" / ".join(pdt["ev"]) if pdt["ev"] else "型番が一致") if n else "1枚ずつなので、そのまま組にした(型番が重なる行は、見つかりませんでした)"
+        why = f"{n}行が、ひもづいた。根拠: " + (" / ".join(pdt["ev"]) if pdt["ev"] else "型番が一致") if n else "1枚ずつなので、そのまま組にした(型番が重なる行は、見つかりませんでした)。" + f"左の書類: {_samp(q)} ／ 右の書類: {_samp(o)}"
         if others_o: why += tr(f"。★この発注書は、ほかの見積(「{'」「'.join(others_o)}」)の品目も、含んでいる", qq, LB)
         if others_q: why += tr(f"。★この見積は、ほかの発注書(「{'」「'.join(others_q)}」)にも、分かれている", qq, LB)
         if mode == "ks": cmp_, skp_ = ["型式", "品名", "個数", "単価", "金額"], []
@@ -334,7 +342,7 @@ def build(quotes, orders, mode="qo", labels=None):
     paired_q = {k[0] for k in link}; paired_o = {k[1] for k in link}
     for o in orders:
         if id(o) not in paired_o and qq:
-            out.append((None, o, f"相手が決まらない(型番が重なる行が、1つも無い)。対応する{LB[0]}が、入っていない(または、入れる社の枠が違う)かもしれません", [], [], []))
+            out.append((None, o, f"相手が決まらない(型番が重なる行が、1つも無い)。対応する{LB[0]}が、入っていない(または、入れる社の枠が違う)かもしれません。この書類: {_samp(o)}" + (f" ／ 相手側の書類の例: {_samp(quotes[0])}" if quotes else ""), [], [], []))
         elif id(o) not in paired_o:
             on = C.quote_no(o.text); rf = ctx.refs[id(o)]
             parts = ["相手が決まらない(ひもづく行が、1つも無い)"]
@@ -345,7 +353,7 @@ def build(quotes, orders, mode="qo", labels=None):
             out.append((None, o, "。".join(parts), [], [], []))
     for q in quotes:
         if id(q) not in paired_q and qq:
-            out.append((q, None, f"対応する{LB[1]}がない(型番が重なる行が、1つも無い)", [], [], []))
+            out.append((q, None, f"対応する{LB[1]}がない(型番が重なる行が、1つも無い)。この書類: {_samp(q)}" + (f" ／ 相手側の書類の例: {_samp(orders[0])}" if orders else ""), [], [], []))
         elif id(q) not in paired_q:
             refs = sorted({x for o in orders for x in ctx.refs[id(o)]})
             out.append((q, None, "対応する発注書がない" + (f"(入っている発注書が書いている見積番号: {'、'.join(refs)}。この見積の番号: {ctx.qno[id(q)] or '読み取れなかった'})" if refs else ""), [], [], []))
