@@ -79,11 +79,13 @@ def to_amount(text):
 
 # ---------------------------------------------------------------- 見出しから、列の位置を決める
 HEAD = {
+    "kind": ("区分", "入出金", "取引種別"),
     "date": ("日付", "取引日", "年月日", "取引年月日", "処理日", "お取引日", "月日"),
     "desc": ("摘要", "お取引内容", "取引内容", "内容", "取引先", "振込人", "お名前", "名義", "備考", "適用", "取引名"),
     "out": ("出金", "お支払", "お引出", "払戻", "支払金額", "引出", "お引き出し", "支払"),
     "in": ("入金", "お預り", "お預入", "預入", "お預かり", "預り金額", "預かり", "入金額"),
     "bal": ("残高",),
+    "amt": ("金額", "取引金額"),
 }
 
 
@@ -193,6 +195,52 @@ def read_pdf(path, name=None, progress=None, cancel=None):
     return doc
 
 
+def read_csv(path, name=None, progress=None, cancel=None):
+    """銀行からダウンロードしたCSV(UTF-8 / Shift_JIS・カンマ/タブ区切り)を、PDFと同じ形の表にする。CSVは、PDFより確実(文字を取り出す手間も、読み違いもない)"""
+    import csv
+    name = name or os.path.basename(path)
+    doc = {"name": name, "path": path, "pages": 0, "rows": [], "notes": [], "page_stats": [], "order": "asc", "swapped": False, "text_pages": 0, "kind": "csv"}
+    raw = open(path, "rb").read()
+    text = None
+    for enc in ("utf-8-sig", "cp932", "utf-16"):
+        try: text = raw.decode(enc); break
+        except Exception: continue
+    if text is None:
+        text = raw.decode("utf-8", "replace"); doc["notes"].append("文字コードを判別できなかったので、文字化けがあるかもしれません")
+    head = text[:4000]
+    delim = max((",", "\t", ";"), key=lambda c: head.count(c))
+    grid = [[c.strip() for c in r] for r in csv.reader(text.splitlines(), delimiter=delim)]
+    hi, cols = None, None
+    for i, r in enumerate(grid):
+        cand = {}
+        for j, c in enumerate(r):
+            k = _key_of(c)
+            if k and k not in cand: cand[k] = j
+        if "date" in cand and (("in" in cand or "out" in cand) or ("amt" in cand)):
+            hi, cols = i, cand; break
+    if hi is None:
+        doc["notes"].append("見出し行(日付・入金・出金・残高など)が見つかりません。CSVの先頭の数行を見せてもらえれば、読み方を合わせます"); return doc
+    default_year = None
+    m = re.search(r"(20\d{2})", name)
+    if m: default_year = int(m.group(1))
+    def cell(r, k): return r[cols[k]] if k in cols and cols[k] < len(r) else ""
+    for i, r in enumerate(grid[hi + 1:], start=hi + 2):
+        iso = parse_date(cell(r, "date"), default_year)
+        if not iso: continue
+        row = {"date": iso, "desc": cell(r, "desc"), "out": to_amount(cell(r, "out")), "in": to_amount(cell(r, "in")), "bal": to_amount(cell(r, "bal")),
+               "page": 0, "bbox": None, "raw": delim.join(r), "csvline": i}
+        if "amt" in cols and row["in"] is None and row["out"] is None:   # 金額1列 + 入出金の区分
+            a = to_amount(cell(r, "amt")); kd = unicodedata.normalize("NFKC", cell(r, "kind"))
+            if a is not None:
+                if any(w in kd for w in ("入金", "預入", "預り", "入")) and "出" not in kd: row["in"] = abs(a)
+                elif any(w in kd for w in ("出金", "支払", "引出", "払")): row["out"] = abs(a)
+                else: row["in" if a >= 0 else "out"] = abs(a)
+        doc["rows"].append(row)
+    if not doc["rows"]: doc["notes"].append("行を1つも読み取れませんでした(日付の形が、想定と違うかもしれません)")
+    check_balance(doc)
+    return doc
+
+
 def check_balance(doc):
     """残高のつながりで、全行を検算する(前の残高 + 入金 - 出金 = 今の残高)。合わない行に、印をつける"""
     rows = doc["rows"]
@@ -250,7 +298,7 @@ def search(docs, query):
         glist.append({"id": i, "key": n, "name": g["names"].most_common(1)[0][0], "variants": list(g["names"].keys())[:5], "count": g["count"], "in": g["in"], "out": g["out"],
                       "exact": any(q == n for q in qs)})
     gid = {g["key"]: g["id"] for g in glist}
-    rows = [{"doc": di, "i": ri, "g": gid[n], "date": r["date"], "desc": r["desc"], "in": r["in"], "out": r["out"], "bal": r["bal"], "page": r["page"], "chk": r.get("chk", "na"), "file": docs[di]["name"], "box": [round(x, 4) for x in r["bbox"]]}
+    rows = [{"doc": di, "i": ri, "g": gid[n], "date": r["date"], "desc": r["desc"], "in": r["in"], "out": r["out"], "bal": r["bal"], "page": r["page"], "chk": r.get("chk", "na"), "file": docs[di]["name"], "box": ([round(x, 4) for x in r["bbox"]] if r.get("bbox") else None), "raw": r.get("raw", "")}
             for di, ri, r, n in hits]
     rows.sort(key=lambda r: (r["date"], r["file"]))
     return {"groups": glist, "rows": rows, "query": query}
