@@ -9,6 +9,7 @@ def make_kyo3(path, items=None):
     d = fitz.open(); pg = d.new_page(width=842, height=595); T = lambda xy, s, fs=7, f="japan": pg.insert_text(xy, s, fontname=f, fontsize=fs)
     def R(xr, s, y, f="helv"): T((xr - fitz.get_text_length(s, "helv", 7), y), s, f=f)
     T((300, 40), "検収明細表", 14)
+    T((600, 60), "当月検収額", 8); R(805, sp(f"{sum(p*q for _, _, q, p in items):,.2f}"), 60)
     for x, h in ((20, "No."), (125, "注文番号/支給No."), (225, "SEQ"), (250, "品目コード"), (330, "品名"), (600, "規格"), (765, "検収金額")): T((x, 100), h, 7)
     for x, h in ((128, "区分"), (160, "発注/要求元"), (225, "取引先"), (265, "入荷日"), (305, "検収日"), (345, "提供引渡日"), (440, "入荷数"), (475, "単位"), (500, "合格数"), (560, "単価"), (590, "個単"), (620, "税率"), (765, "消費税額")): T((x, 112), h, 7)
     y = 130
