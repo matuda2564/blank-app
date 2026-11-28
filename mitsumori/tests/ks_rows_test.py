@@ -40,3 +40,25 @@ ok = [k for k, r in res.items() if r["status"] == "OK"]; assert len(ok) == 9, (l
 assert "単価" in res["10077473640"]["msg"] and "個数" in res["10076774752"]["msg"]
 shutil.rmtree(tmp, ignore_errors=True)
 print("ks_rows spaced e2e OK")
+
+# 写真(2026-11-28)の見た目: 見出しが2段・区分/発注要求元が注文番号の真下・上段に注文番号と金額、下段に個数と単価。+ 自社請求書の『0円の内訳の行』
+import gen_ks3, fitz
+tmp = tempfile.mkdtemp(); os.environ["MC_WORK"] = tmp
+for role in ("自社請求書", "京セラ請求書"): os.makedirs(os.path.join(tmp, "K", role))
+gen_ks.make_ours(os.path.join(tmp, "K", "自社請求書", "請求書.pdf")); gen_ks3.make_kyo3(os.path.join(tmp, "K", "京セラ請求書", "検収明細.pdf"))
+# 自社の請求書に、『セットの部品(0円)』を足した版
+pg = fitz.open(os.path.join(tmp, "K", "自社請求書", "請求書.pdf")); page = pg[0]
+y = 222 + 22 * 12 + 4
+for k, nm in enumerate(("IDEC 押ボタンスイッチ HW1B-M110G", "IDEC ランプ HW1P-1QMPW")):
+    page.insert_text((50, y), "11/11", fontname="helv", fontsize=9); page.insert_text((100, y), "10076598393", fontname="helv", fontsize=9)
+    page.insert_text((210, y), nm, fontname="helv", fontsize=8); page.insert_text((388, y), "1", fontname="helv", fontsize=9)
+    page.insert_text((470 - fitz.get_text_length("0", "helv", 9), y), "0", fontname="helv", fontsize=9); page.insert_text((535 - fitz.get_text_length("0", "helv", 9), y), "0", fontname="helv", fontsize=9); y += 22
+pg.save(os.path.join(tmp, "K", "自社請求書", "請求書2.pdf")); pg.close(); os.remove(os.path.join(tmp, "K", "自社請求書", "請求書.pdf")); os.rename(os.path.join(tmp, "K", "自社請求書", "請求書2.pdf"), os.path.join(tmp, "K", "自社請求書", "請求書.pdf"))
+v = C.run_vendor(os.path.join(tmp, "K"), workers=1, name="K", mode="ks")
+allr = [r for p in v["pairs"] for r in p["results"]]
+res = {r["model"].split()[0] + str(i): r for i, r in enumerate(allr)}
+ok = [r for r in allr if r["status"] == "OK"]
+assert len(ok) == 9 + 2, (len(ok), [(r["model"], r["status"], r["msg"][:30]) for r in allr])
+assert sum(1 for r in allr if r["status"] != "OK") == 4, [(r["model"], r["status"]) for r in allr]
+shutil.rmtree(tmp, ignore_errors=True)
+print("ks_rows real-layout OK")
