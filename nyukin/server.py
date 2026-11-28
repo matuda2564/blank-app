@@ -37,7 +37,8 @@ def files():
 
 
 def doc_public(d):
-    return {"name": d["name"], "pages": d["pages"], "kind": d.get("kind", "pdf"), "rows": len(d["rows"]), "notes": d["notes"], "balance": d.get("balance"), "order": d["order"], "text_pages": d["text_pages"],
+    return {"name": d["name"], "pages": d["pages"], "kind": d.get("kind", "pdf"), "rows": len(d["rows"]), "no_balance": bool(d.get("no_balance")), "csv": d.get("csv"),
+            "in_total": sum(r["in"] or 0 for r in d["rows"]), "out_total": sum(r["out"] or 0 for r in d["rows"]), "notes": d["notes"], "balance": d.get("balance"), "order": d["order"], "text_pages": d["text_pages"],
             "page_stats": d["page_stats"], "range": [min((r["date"] for r in d["rows"]), default=None), max((r["date"] for r in d["rows"]), default=None)]}
 
 
@@ -161,6 +162,15 @@ class H(BaseHTTPRequestHandler):
                 JOB.update(status="running", done=0, total=0, msg="", t0=time.time(), sec=0, ev=ev)
                 threading.Thread(target=run_job, args=(JOB["gen"], ev), daemon=True).start()
                 return self._send(200, {"ok": True})
+            if u.path == "/api/recolumns":   # CSVの、列の割り当てを、人が決め直す(名義・日付・入金・出金・残高)
+                name = safe_name(q["name"])
+                ov = {k: int(q[k]) for k in ("date", "desc", "in", "out", "bal") if k in q}
+                with LOCK:
+                    for i, d in enumerate(DOCS):
+                        if d["name"] == name and d.get("kind") == "csv":
+                            DOCS[i] = N.read_csv(d["path"], name, override=ov)
+                            return self._send(200, {"ok": True})
+                return self._send(404, {"error": "そのCSVは、読み込まれていません"})
             if u.path == "/api/cancel":
                 JOB["gen"] += 1
                 if JOB.get("ev"): JOB["ev"].set()

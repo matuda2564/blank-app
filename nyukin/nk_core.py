@@ -45,6 +45,7 @@ def _era(y_era, letter):
 
 DATE_RES = [
     (re.compile(r"(\d{4})\s*[/.\-年]\s*(\d{1,2})\s*[/.\-月]\s*(\d{1,2})"), lambda m, y: (int(m[1]), int(m[2]), int(m[3]))),
+    (re.compile(r"(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)"), lambda m, y: (int(m[1]), int(m[2]), int(m[3]))),   # 20261101 の形
     (re.compile(r"(令和|平成|昭和|[RHS])\s*(\d{1,2})\s*[/.\-年]\s*(\d{1,2})\s*[/.\-月]\s*(\d{1,2})"),
      lambda m, y: (_era(int(m[2]), {"令和": "R", "平成": "H", "昭和": "S"}.get(m[1], m[1])), int(m[3]), int(m[4]))),
     (re.compile(r"(?<!\d)(\d{2})\s*[/.\-]\s*(\d{1,2})\s*[/.\-]\s*(\d{1,2})(?!\d)"), lambda m, y: (2000 + int(m[1]), int(m[2]), int(m[3]))),
@@ -195,8 +196,10 @@ def read_pdf(path, name=None, progress=None, cancel=None):
     return doc
 
 
-def read_csv(path, name=None, progress=None, cancel=None):
-    """銀行からダウンロードしたCSV(UTF-8 / Shift_JIS・カンマ/タブ区切り)を、PDFと同じ形の表にする。CSVは、PDFより確実(文字を取り出す手間も、読み違いもない)"""
+def read_csv(path, name=None, progress=None, cancel=None, override=None):
+    """銀行からダウンロードしたCSV(UTF-8 / Shift_JIS・カンマ/タブ区切り)を、PDFと同じ形の表にする。
+    見出しの名前から、列(日付・名義・入金・出金・残高)を決める。名義の列が見つからないときは、推測する。
+    override={'date':列番号,'desc':…,'in':…,'out':…,'bal':…}(-1=その列は無い)で、列の割り当てを、人が決め直せる。"""
     import csv
     name = name or os.path.basename(path)
     doc = {"name": name, "path": path, "pages": 0, "rows": [], "notes": [], "page_stats": [], "order": "asc", "swapped": False, "text_pages": 0, "kind": "csv"}
@@ -219,10 +222,35 @@ def read_csv(path, name=None, progress=None, cancel=None):
         if "date" in cand and (("in" in cand or "out" in cand) or ("amt" in cand)):
             hi, cols = i, cand; break
     if hi is None:
-        doc["notes"].append("見出し行(日付・入金・出金・残高など)が見つかりません。CSVの先頭の数行を見せてもらえれば、読み方を合わせます"); return doc
+        doc["notes"].append("見出し行(日付・入金額・出金額など)が見つかりません。CSVの1行目(列の名前)を見せてもらえれば、読み方を合わせます"); return doc
+    headers = list(grid[hi])
     default_year = None
     m = re.search(r"(20\d{2})", name)
     if m: default_year = int(m.group(1))
+    guessed = False
+    if override:
+        for k, v in override.items():
+            if v is None or v < 0: cols.pop(k, None)
+            else: cols[k] = v
+    body = [r for r in grid[hi + 1:] if any(r)]
+    if "desc" in cols and not (override and "desc" in override):   # 「備考」など、見出しから決めた名義の列が、ほとんど空なら、別の列を探す
+        j0 = cols["desc"]; filled = sum(1 for r in body if j0 < len(r) and r[j0].strip())
+        if body and filled < 0.3 * len(body): cols.pop("desc")
+    if "desc" not in cols:   # 名義の列が見つからない: 数字でも日付でもない文字が、いちばん長い列を、名義と推測する
+        best, bl = None, 0
+        for j in range(len(headers)):
+            if j in cols.values(): continue
+            vals = [r[j] for r in body[:200] if j < len(r) and r[j]]
+            txt = [v for v in vals if not re.fullmatch(r"[\d,\-/.\s]+", unicodedata.normalize("NFKC", v))]
+            if len(txt) >= max(1, len(vals) // 2):
+                avg = sum(len(v) for v in txt) / max(1, len(txt))
+                if avg > bl: best, bl = j, avg
+        if best is not None:
+            cols["desc"] = best; guessed = True
+            doc["notes"].append(f"名義の列は、見出しからは決められなかったので、「{headers[best] or str(best + 1) + '列目'}」と推測しました。違うときは、下の「列の割り当て」で選び直してください")
+        else:
+            doc["notes"].append("名義(お客さんの名前)の列が見つかりません。下の「列の割り当て」で、名義の列を選んでください")
+    doc["csv"] = {"headers": headers, "cols": dict(cols), "guessed": guessed}
     def cell(r, k): return r[cols[k]] if k in cols and cols[k] < len(r) else ""
     for i, r in enumerate(grid[hi + 1:], start=hi + 2):
         iso = parse_date(cell(r, "date"), default_year)
@@ -244,8 +272,10 @@ def read_csv(path, name=None, progress=None, cancel=None):
 def check_balance(doc):
     """残高のつながりで、全行を検算する(前の残高 + 入金 - 出金 = 今の残高)。合わない行に、印をつける"""
     rows = doc["rows"]
-    if len(rows) < 2:
+    if len(rows) < 2 or not any(r["bal"] is not None for r in rows):
         for r in rows: r["chk"] = "na"
+        if rows and not any(r["bal"] is not None for r in rows):
+            doc["no_balance"] = True   # 残高の列が無い(この明細は、入金額・出金額だけ): 検算はしない。件数と合計を、銀行の画面と見比べてもらう
         return
     ordered = rows if rows[0]["date"] <= rows[-1]["date"] else list(reversed(rows))
     doc["order"] = "asc" if ordered is rows else "desc"
