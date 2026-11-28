@@ -72,3 +72,17 @@ st, msg = ks_rows.read_check(dk, rk); assert st == "ok", (st, msg, ks_rows.state
 st, msg = ks_rows.read_check(dk, rk[:-2]); assert st == "ng" and "差" in msg, (st, msg)   # 2行 読み漏らしたら、警告
 shutil.rmtree(tmp, ignore_errors=True)
 print("ks_rows read-check OK")
+
+# 自社請求書の品名(『メーカー / 品名』と見出しが分かれていても読める)・読み取り結果のCSV → 書類の代わりに読み込める
+tmp = tempfile.mkdtemp(); os.environ["MC_WORK"] = tmp
+gen_ks.make_ours(os.path.join(tmp, "o.pdf")); gen_ks3.make_kyo3(os.path.join(tmp, "k.pdf"))
+do = C.read_doc(os.path.join(tmp, "o.pdf"), "自社請求書"); ro = ks_rows.extract(do)
+assert all(r["name"] for r in ro), [r["model"] for r in ro if not r["name"]]
+dk = C.read_doc(os.path.join(tmp, "k.pdf"), "京セラ請求書"); rk = ks_rows.extract(dk)
+import csv
+with open(os.path.join(tmp, "k.csv"), "w", encoding="utf-8-sig", newline="") as f:
+    w = csv.writer(f); w.writerow(["注文番号", "品名", "数量", "単価", "金額"]); [w.writerow([r["model"], r["name"], r["qty"], r["price"], r["amount"]]) for r in rk]
+dc = C.read_doc(os.path.join(tmp, "k.csv"), "京セラ請求書"); rc = ks_rows.extract(dc)
+assert [(r["model"], r["qty"], r["price"], r["amount"]) for r in rc] == [(r["model"], r["qty"], r["price"], r["amount"]) for r in rk]
+shutil.rmtree(tmp, ignore_errors=True)
+print("ks_rows csv-roundtrip OK")

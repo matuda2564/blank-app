@@ -81,6 +81,15 @@ def save_html_to_desktop(body):
     return p
 
 
+def save_csv_to_desktop(body, name):
+    """読み取り結果(書類から読んだ行)を、CSVにして、デスクトップへ。Excelで開けて、あとで、書類の代わりに読み込める(UTF-8 BOMつき)"""
+    nm = re.sub(r"[\\/:*?\"<>|\s]+", "_", os.path.splitext(name or "書類")[0])[:40] or "書類"
+    p = os.path.join(desktop_dir(), f"読み取り結果_{nm}_" + time.strftime("%Y%m%d_%H%M%S") + ".csv")
+    txt = body.decode("utf-8", "replace")
+    with open(p, "w", encoding="utf-8-sig", newline="") as f: f.write(txt)
+    return p
+
+
 def _pid_alive(pid):
     try:
         if os.name == "nt":
@@ -306,6 +315,8 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True})
             if u.path == "/api/savehtml":   # 結果をデスクトップに保存する(専用の窓では、ダウンロードが動かないことがあるため)
                 return self._send(200, {"ok": True, "path": save_html_to_desktop(body)})
+            if u.path == "/api/savecsv":   # 読み取り結果を、CSVでデスクトップへ
+                return self._send(200, {"ok": True, "path": save_csv_to_desktop(body, q.get("name", ""))})
             if u.path == "/api/reset":   # リセット: その使い方の、書類も結果も、消す(もう一方の使い方の書類は、消さない)
                 if JOB["status"] == "running": return self._send(409, {"error": "照合中です"})
                 mode = _mode(q)

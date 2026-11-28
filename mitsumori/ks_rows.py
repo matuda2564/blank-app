@@ -131,7 +131,7 @@ def extract(d):
             cols_prev = cols
         centers = {k: v[0] for k, v in cols.items()}
         name_x1 = min([v for k, v in centers.items() if k in ("qty", "price", "amount")] or [1e9])
-        name_x0 = min([a for t, a, b, yc, h in cand if "name" in cols and t == cols["name"][2]] or [-1e9])
+        name_x0 = min([a for t, a, b, yc, h in cand if "name" in cols and _col_of(t) == "name" and abs(yc - cols["name"][1]) < 4] or [-1e9])   # 『メーカー / 品名』のように、品名の見出しが分かれていても、一番 左の文字から
         sinks = [((a + b) / 2) for t, a, b, yc, h in cand if _col_of(t) == "sink" and (hdr_y is None or abs(yc - hdr_y) < 22)]
         def assign(x):
             best, bd = None, 1e9
