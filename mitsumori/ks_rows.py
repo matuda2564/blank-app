@@ -23,15 +23,18 @@ def num(t):
 
 
 def _merge(toks):
-    """『199, 500』のように、カンマのあとで、数字が分かれて読めた断片を、1つの数にする。toks=[(text,x0,x1)]"""
+    """『112, 000. 00000』『10. 000』のように、カンマや小数点のあとで、数字が分かれて読めた断片を、1つの数にする。toks=[(text,x0,x1)]
+    (京セラの書類は、桁区切りと小数点のあとに、すきまが空いて見える。何度でも、つなぐ)"""
     out = []
     for t, a, b in toks:
-        if out and re.fullmatch(r"[\d,]*,", _nf(out[-1][0])) and re.match(r"\d", _nf(t)) and a - out[-1][2] < 9:
-            out[-1] = (out[-1][0] + t, out[-1][1], b)
-        elif out and re.fullmatch(r"\d[\d,]*", _nf(out[-1][0])) and re.fullmatch(r",\d+[\d,.]*", _nf(t)) and a - out[-1][2] < 9:
-            out[-1] = (out[-1][0] + t, out[-1][1], b)
-        else:
-            out.append((t, a, b))
+        nt = _nf(t)
+        if out:
+            pt = _nf(out[-1][0]); near = a - out[-1][2] < 9
+            if near and re.fullmatch(r"[\d,.]*[,.]", pt) and re.match(r"\d", nt):
+                out[-1] = (out[-1][0] + t, out[-1][1], b); continue
+            if near and re.fullmatch(r"\d[\d,.]*", pt) and re.fullmatch(r"[,.]\d[\d,.]*", nt):
+                out[-1] = (out[-1][0] + t, out[-1][1], b); continue
+        out.append((t, a, b))
     return out
 
 
@@ -54,6 +57,34 @@ def _col_of(word):
             return role
     if any(x in w for x in SINKS): return "sink"
     return None
+
+
+def _fix_by_arith(row, span):
+    """列の割り当てが、ずれて読めたときの保険。京セラの行は『個数 × 単価 = 金額』が必ず成り立つので、
+    割り当てた3つが合わないときだけ、行の中の数字から、合う組(個数, 単価, 金額)を探して、置き直す(合う組が1つに決まらなければ、触らない)"""
+    q, p, a = row["qty"], row["price"], row["amount"]
+    if None not in (q, p, a) and abs(q * p - a) <= max(1.0, abs(a) * 1e-6): return
+    vals = []
+    for t, x0, x1, yc, h in sorted(span, key=lambda x: x[1]):
+        v = num(t)
+        if v is not None and v > 0 and not ORDER_RE.fullmatch(_nf(t).replace(" ", "")): vals.append(v)
+    found = set()
+    for i, qq in enumerate(vals):
+        if qq > 100000: continue
+        for j, pp in enumerate(vals):
+            if j == i: continue
+            for k, aa in enumerate(vals):
+                if k in (i, j): continue
+                if abs(qq * pp - aa) <= max(1.0, aa * 1e-6) and aa >= 1: found.add((qq, pp, aa))
+    if not found: return
+    best = max(found, key=lambda t: t[2])   # 税額(金額の1割)と取り違えないよう、金額が大きい組
+    same = [t for t in found if t[2] == best[2]]
+    if len({(t[0], t[1]) for t in same}) > 1:
+        same2 = [t for t in same if t[0] == (q if q is not None else t[0]) or t[1] == (p if p is not None else t[1])]
+        if len(same2) != 1: return
+        best = same2[0]
+    row["qty"], row["price"], row["amount"] = best
+    row["problems"].append("列がずれていたので、個数×単価=金額 で置き直した")
 
 
 def extract(d):
@@ -127,6 +158,7 @@ def extract(d):
             row["name"] = "".join(name_parts)[:80]
             xs = [x[1] for x in span] + [x[2] for x in span]; ys = [x[3] - x[4] / 2 for x in span] + [x[3] + x[4] / 2 for x in span]
             row["x0"], row["x1"], row["y0"], row["y1"] = min(xs), max(xs), min(ys), max(ys)
+            _fix_by_arith(row, span)
             if row["amount"] is None or row["price"] is None: row["problems"].append("単価または金額を読み取れなかった")
             rows.append(row)
     return rows or None
