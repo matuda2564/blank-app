@@ -55,8 +55,11 @@ function render(){
  for(const d of docs){
   const b=d.balance;
   h+=`<div style="margin:6px 0"><b>${esc(d.name)}</b> <span class="small">${d.kind==='csv'?'CSV':d.pages+'ページ'}・<b>${d.rows}行</b>を読み取り${d.range[0]?`・${d.range[0]} 〜 ${d.range[1]}`:''}</span><br>`;
-  if(b)h+=`<span class="chip ${b.ng?'ng':'ok'}">残高の検算: ${b.ok}行が一致${b.ng?` / <b>${b.ng}行が合わない</b>`:''}</span>`;
-  else h+='<span class="chip rv">残高の検算: できませんでした(残高の列が読めない)</span>';
+  h+=`<span class="chip">読み取った合計: 入金 <b>${yen(d.in_total)}</b>円 / 出金 <b>${yen(d.out_total)}</b>円</span> `;
+  if(d.no_balance)h+='<span class="chip rv">この明細には、残高の列が無いので、残高の検算はしません(検索と合計には、影響ありません)。<b>上の件数・合計を、銀行の画面の合計と見比べてください</b></span>';
+  else if(b&&(b.ok||b.ng))h+=`<span class="chip ${b.ng?'ng':'ok'}">残高の検算: ${b.ok}行が一致${b.ng?` / <b>${b.ng}行が合わない</b>`:''}</span>`;
+  else h+='<span class="chip rv">残高の検算: できませんでした</span>';
+  if(d.csv)h+=colsUi(d);
   if(d.kind!=='csv'&&d.text_pages<d.pages)h+=`<span class="chip ng">文字が取れなかったページ: ${d.pages-d.text_pages}</span>`;
   const bad=d.page_stats.filter(s=>s.note||(s.words&&!s.rows));
   if(bad.length)h+=`<div class="warn">行を読み取れなかったページ: ${bad.map(s=>s.page+'ページ'+(s.note?'('+esc(s.note)+')':'')).join('、')}。このページは、人が確認してください。</div>`;
@@ -82,6 +85,13 @@ async function poll(){for(;;){await refresh();if(ST.job.status!=='running')break
 $('reset').onclick=async()=>{if(!confirm('読み込んだPDFと、読み取った中身を、全部消します(次の月の準備です)。よろしいですか?'))return;await api('/api/reset',{method:'POST'});RES=null;$('res').innerHTML='';$('q').value='';refresh();toast('消しました。次の月のPDFを入れてください')};
 $('go').onclick=search;$('q').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();search()}};
 async function search(){const q=$('q').value.trim();if(!q)return;try{RES=await api('/api/search?q='+encodeURIComponent(q));RES.sel=new Set(RES.groups.map(g=>g.id));showRes()}catch(e){toast(e.message)}}
+function colsUi(d){
+ const C=d.csv,hs=C.headers,cs=C.cols,roles=[['date','日付'],['desc','名義(お客さんの名前)'],['in','入金'],['out','出金'],['bal','残高']];
+ const sel=(k,lab)=>`<label style="margin-right:12px">${lab}: <select onchange="recol('${encodeURIComponent(d.name)}')" data-k="${k}"><option value="-1" ${cs[k]==null?'selected':''}>(なし)</option>${hs.map((x,i)=>`<option value="${i}" ${cs[k]===i?'selected':''}>${esc(x||((i+1)+'列目'))}</option>`).join('')}</select></label>`;
+ return `<details class="small" style="margin:4px 0" ${C.guessed||cs.desc==null?'open':''}><summary>列の割り当て(どの列を、何として読んだか)</summary><div style="margin:4px 0">${roles.map(r=>sel(r[0],r[1])).join('')}</div></details>`}
+async function recol(name){
+ const el=[...document.querySelectorAll('select[data-k]')].filter(x=>x.getAttribute('onchange').includes(name));const q=['name='+name];
+ el.forEach(x=>q.push(x.dataset.k+'='+x.value));await api('/api/recolumns?'+q.join('&'),{method:'POST'});RES=null;$('res').innerHTML='';refresh();toast('列の割り当てを変えて、読み直しました')}
 function pick(){return RES.rows.filter(r=>RES.sel.has(r.g))}
 function showRes(){
  if(!RES.groups.length){$('res').innerHTML='<div class="warn">「'+esc(RES.query)+'」に当たる名義は、見つかりませんでした。カタカナ(例: キョウセラ)で探してみてください。</div>';return}
