@@ -23,8 +23,8 @@ tr.ng td{background:#fff3f3}.tot{display:flex;gap:22px;flex-wrap:wrap;margin:8px
 <header><h1>入金確認 <small class="small" id="ver"></small></h1><span class="sp"></span><span id="loaded" class="small"></span>
 <button class="danger" id="reset" title="読み込んだPDFと、読み取った中身を、全部消します">データを消して、次の月へ</button></header>
 <main>
-<div class="card" id="c1"><h2>① 銀行の入出金リスト(PDF)を入れて、「読み込む」</h2>
-<div class="dz" id="dz">ここにPDFをドラッグ、またはクリックして選ぶ(3店舗ぶんを、まとめて入れても構いません)</div>
+<div class="card" id="c1"><h2>① 銀行の入出金リスト(CSVかPDF)を入れて、「読み込む」</h2>
+<div class="dz" id="dz">ここにCSVかPDFをドラッグ、またはクリックして選ぶ(<b>CSVのほうが確実</b>です。3店舗ぶんを、まとめて入れても構いません)</div>
 <div class="files" id="files"></div>
 <div style="margin-top:8px"><button class="pri" id="load">読み込む(文字を取り出して、データにする)</button> <button id="cancel" hidden>中止</button> <span class="small" id="pmsg"></span></div>
 <div class="bar" id="pbar" hidden><i id="pfill"></i></div>
@@ -54,10 +54,10 @@ function render(){
  const docs=ST.docs;let h='';
  for(const d of docs){
   const b=d.balance;
-  h+=`<div style="margin:6px 0"><b>${esc(d.name)}</b> <span class="small">${d.pages}ページ・<b>${d.rows}行</b>を読み取り${d.range[0]?`・${d.range[0]} 〜 ${d.range[1]}`:''}</span><br>`;
+  h+=`<div style="margin:6px 0"><b>${esc(d.name)}</b> <span class="small">${d.kind==='csv'?'CSV':d.pages+'ページ'}・<b>${d.rows}行</b>を読み取り${d.range[0]?`・${d.range[0]} 〜 ${d.range[1]}`:''}</span><br>`;
   if(b)h+=`<span class="chip ${b.ng?'ng':'ok'}">残高の検算: ${b.ok}行が一致${b.ng?` / <b>${b.ng}行が合わない</b>`:''}</span>`;
   else h+='<span class="chip rv">残高の検算: できませんでした(残高の列が読めない)</span>';
-  if(d.text_pages<d.pages)h+=`<span class="chip ng">文字が取れなかったページ: ${d.pages-d.text_pages}</span>`;
+  if(d.kind!=='csv'&&d.text_pages<d.pages)h+=`<span class="chip ng">文字が取れなかったページ: ${d.pages-d.text_pages}</span>`;
   const bad=d.page_stats.filter(s=>s.note||(s.words&&!s.rows));
   if(bad.length)h+=`<div class="warn">行を読み取れなかったページ: ${bad.map(s=>s.page+'ページ'+(s.note?'('+esc(s.note)+')':'')).join('、')}。このページは、人が確認してください。</div>`;
   d.notes.forEach(n=>h+=`<div class="warn">${esc(n)}</div>`);
@@ -72,7 +72,7 @@ async function up(files){
   try{await api('/api/upload?name='+encodeURIComponent(f.name),{method:'POST',body:f})}catch(e){toast('入れられませんでした: '+e.message)}
  }refresh();
 }
-$('dz').onclick=()=>{const i=document.createElement('input');i.type='file';i.multiple=true;i.accept='.pdf';i.style.display='none';document.body.appendChild(i);i.onchange=()=>{up([...i.files]).then(()=>i.remove())};i.click()};
+$('dz').onclick=()=>{const i=document.createElement('input');i.type='file';i.multiple=true;i.accept='.pdf,.csv';i.style.display='none';document.body.appendChild(i);i.onchange=()=>{up([...i.files]).then(()=>i.remove())};i.click()};
 $('dz').ondragover=e=>{e.preventDefault();$('dz').classList.add('over')};$('dz').ondragleave=()=>$('dz').classList.remove('over');
 $('dz').ondrop=e=>{e.preventDefault();$('dz').classList.remove('over');up([...e.dataTransfer.files])};
 async function rm(n){await api('/api/remove?name='+encodeURIComponent(n),{method:'POST'});RES=null;$('res').innerHTML='';refresh()}
@@ -95,7 +95,7 @@ function list(){
  if(ng)h+=`<div class="warn">残高が合わない行が ${ng}行 含まれています(赤い行)。読み取りが間違っているかもしれません。<b>元のページを見て、確認してください</b>。</div>`;
  h+=`<div style="margin:6px 0"><button class="pri" onclick="cpList()">一覧をコピー(Excelに貼れます)</button> <button onclick="cpTot()">合計だけコピー</button></div>`;
  h+='<table><tr><th>日付</th><th>名義</th><th>入金</th><th>出金</th><th>検算</th><th>元のページ</th></tr>';
- R.forEach((r,i)=>{h+=`<tr class="${r.chk==='ng'?'ng':''}"><td>${r.date}</td><td>${esc(r.desc)}</td><td class="n">${yen(r.in)}</td><td class="n">${yen(r.out)}</td><td>${r.chk==='ok'?'○':r.chk==='ng'?'✕ 合わない':'−'}</td><td><button class="sm" onclick="showPage(${r.doc},${r.i},${r.page})">${r.page}ページを見る</button></td></tr>`});
+ R.forEach((r,i)=>{h+=`<tr class="${r.chk==='ng'?'ng':''}"><td>${r.date}</td><td>${esc(r.desc)}</td><td class="n">${yen(r.in)}</td><td class="n">${yen(r.out)}</td><td>${r.chk==='ok'?'○':r.chk==='ng'?'✕ 合わない':'−'}</td><td>${r.page?`<button class="sm" onclick="showPage(${r.doc},${r.i},${r.page})">${r.page}ページを見る</button>`:`<button class="sm" onclick="toast(${JSON.stringify('CSVの元の行: '+(r.raw||'')).replace(/"/g,'&quot;')})">元の行を見る</button>`}</td></tr>`});
  $('list').innerHTML=h+'</table>'}
 function cpList(){const R=pick();const tin=R.reduce((a,r)=>a+(r.in||0),0),tout=R.reduce((a,r)=>a+(r.out||0),0);
  const t=['日付\t名義\t入金\t出金'].concat(R.map(r=>[r.date,r.desc,r.in==null?'':r.in,r.out==null?'':r.out].join('\t'))).concat([`合計\t${R.length}件\t${tin}\t${tout}`]).join('\n');copyTxt(t,`${R.length}行と合計をコピーしました(Excelに貼れます)`)}

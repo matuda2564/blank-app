@@ -37,7 +37,7 @@ def files():
 
 
 def doc_public(d):
-    return {"name": d["name"], "pages": d["pages"], "rows": len(d["rows"]), "notes": d["notes"], "balance": d.get("balance"), "order": d["order"], "text_pages": d["text_pages"],
+    return {"name": d["name"], "pages": d["pages"], "kind": d.get("kind", "pdf"), "rows": len(d["rows"]), "notes": d["notes"], "balance": d.get("balance"), "order": d["order"], "text_pages": d["text_pages"],
             "page_stats": d["page_stats"], "range": [min((r["date"] for r in d["rows"]), default=None), max((r["date"] for r in d["rows"]), default=None)]}
 
 
@@ -54,7 +54,7 @@ def run_job(gen, ev):
         import fitz
         pc = {}
         for n in names:
-            try: pc[n] = len(fitz.open(os.path.join(WORK, "pdf", n)))
+            try: pc[n] = 1 if n.lower().endswith(".csv") else len(fitz.open(os.path.join(WORK, "pdf", n)))
             except Exception: pc[n] = 0
         total = sum(pc.values()) or 1
         new = []
@@ -64,7 +64,7 @@ def run_job(gen, ev):
             def prog(p, t, base=base):
                 if JOB["gen"] == gen: JOB.update(done=base + p, total=total, msg=f"{n} の {p}/{t} ページを読んでいます")
             try:
-                new.append(N.read_pdf(os.path.join(WORK, "pdf", n), n, prog, ev))
+                new.append((N.read_csv if n.lower().endswith(".csv") else N.read_pdf)(os.path.join(WORK, "pdf", n), n, prog, ev))
             except Exception as e:
                 N.log(f"PDFを読めなかった: {n}: {traceback.format_exc()}")
                 new.append({"name": n, "path": "", "pages": 0, "rows": [], "notes": [f"このPDFを読めませんでした({type(e).__name__}: {e})。壊れているか、パスワード付きかもしれません"], "page_stats": [], "order": "asc", "swapped": False, "text_pages": 0})
@@ -80,6 +80,7 @@ def run_job(gen, ev):
 def page_png(doc_i, pno, box=None):
     import fitz
     d = DOCS[doc_i]
+    if d.get("kind") == "csv": raise ValueError("CSVには、元のページがありません")
     pdf = fitz.open(d["path"]); pg = pdf[pno - 1]
     pix = pg.get_pixmap(dpi=110)
     from PIL import Image, ImageDraw
@@ -137,7 +138,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/upload":
                 if JOB["status"] == "running": return self._send(409, {"error": "読み込み中です。終わってからにしてください"})
                 name = safe_name(q.get("name", "file.pdf"))
-                if not name.lower().endswith(".pdf"): return self._send(400, {"error": "PDFだけ入れられます(銀行からダウンロードした、入出金のPDFです)"})
+                if not name.lower().endswith((".pdf", ".csv")): return self._send(400, {"error": "PDFかCSVを入れてください(銀行からダウンロードした、入出金のリストです)"})
                 if not body: return self._send(400, {"error": "中身が空のファイルです"})
                 d = os.path.join(WORK, "pdf"); os.makedirs(d, exist_ok=True)
                 p = os.path.join(d, name); k = 1
