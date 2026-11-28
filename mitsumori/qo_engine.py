@@ -263,6 +263,11 @@ def row_result(ctx, q, o, qr, pr, kind, extra=None):
     return res("OK_IMG" if ocr else "OK", "")
 
 
+def _zero_row(r):
+    """単価も金額も0円の行。セット品の部品(例: ヒーター制御盤の中身)で、相手の書類には、1行にまとまって載ることが多い"""
+    return bool(r) and r.get("amount") == 0 and r.get("price") in (0, None)
+
+
 def _samp(d, n=4):
     """読み取った型番の例(組にならなかったとき、なぜか、見て分かるように)"""
     rows = getattr(d, "rows", None) or []
@@ -317,7 +322,8 @@ def build(quotes, orders, mode="qo", labels=None):
             label = (pr.get("model_raw") or pr.get("name") or "(型番なし)")[:22]
             if mode == "ks": label = f"{pr.get('model_raw') or ''} {(pr.get('name') or '')[:14]}".strip()
             ocr = o.src == "ocr"
-            res = {"status": "REVIEW" if (ocr or pr.get("problems")) else "DIFF", "model": label, "msg": tr("発注書にだけある品目(見積に無い)。", qq, LB) + ("画像の読み取りが確実でないので、断定しない" if ocr else ("どちらが正しいか、目で確認してください" if mode == "ks" else f"{LB[0]}に無い品目です。{LB[1]}に余分な品目が入っていないか、確認してください" if qq else "新しく加わった品目か、別の見積の品目か、確認してください")), "qrow": None, "orow": pr}
+            if mode == "ks" and _zero_row(pr): res = {"status": "OK", "model": label, "msg": "0円の内訳の行(セット品の部品など)。請求の金額には、影響しません", "qrow": None, "orow": pr}
+            else: res = {"status": "REVIEW" if (ocr or pr.get("problems")) else "DIFF", "model": label, "msg": tr("発注書にだけある品目(見積に無い)。", qq, LB) + ("画像の読み取りが確実でないので、断定しない" if ocr else ("どちらが正しいか、目で確認してください" if mode == "ks" else f"{LB[0]}に無い品目です。{LB[1]}に余分な品目が入っていないか、確認してください" if qq else "新しく加わった品目か、別の見積の品目か、確認してください")), "qrow": None, "orow": pr}
             if po: pairs[(po, id(o))]["results"].append(res)
     # 見積の、発注されなかった行(その見積に、1行でも、ひもづいた発注があるときだけ)
     for q in quotes:
@@ -327,6 +333,7 @@ def build(quotes, orders, mode="qo", labels=None):
             if (id(q), qi) in qline or (id(q), qi) in split: continue
             label = (qr.get("model_raw") or qr.get("name") or "(型番なし)")[:22]
             if mode == "ks": label = f"{qr.get('model_raw') or ''} {(qr.get('name') or '')[:14]}".strip()
+            if mode == "ks" and _zero_row(qr): pairs[(id(q), mo)]["results"].append({"status": "OK", "model": label, "msg": "0円の内訳の行(セット品の部品など)。請求の金額には、影響しません", "qrow": qr, "orow": None}); continue
             if qq: pairs[(id(q), mo)]["results"].append({"status": "REVIEW" if q.src == "ocr" else "DIFF", "model": label, "msg": f"{LB[0]}にだけある品目({LB[1]}に無い)。" + ("どちらが正しいか、目で確認してください" if mode == "ks" else "仕入先に、頼む(見積をもらう)必要がある品目か、確認してください") + ("(画像の読み取りが確実でないので、断定しない)" if q.src == "ocr" else ""), "qrow": qr, "orow": None})
             else: pairs[(id(q), mo)]["results"].append({"status": "NOORDER", "model": label, "msg": "見積にあるが、発注書に無い品目(個数減・見送りの可能性。発注されなかった品目です)", "qrow": qr, "orow": None})
     out = []

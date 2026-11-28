@@ -130,16 +130,18 @@ def extract(d):
         else:
             cols_prev = cols
         centers = {k: v[0] for k, v in cols.items()}
+        name_x1 = min([v for k, v in centers.items() if k in ("qty", "price", "amount")] or [1e9])
+        name_x0 = min([a for t, a, b, yc, h in cand if "name" in cols and t == cols["name"][2]] or [-1e9])
         sinks = [((a + b) / 2) for t, a, b, yc, h in cand if _col_of(t) == "sink" and (hdr_y is None or abs(yc - hdr_y) < 22)]
         def assign(x):
             best, bd = None, 1e9
             for k, c in centers.items():
                 if abs(x - c) < bd: best, bd = k, abs(x - c)
-            for c in sinks:
-                if abs(x - c) < bd: best, bd = "sink", abs(x - c)
+            for c in sinks:   # 『その他の列』が勝つのは、はっきり近いときだけ(同じ位置に並ぶ『消費税額』と『検収金額』は、本物の列を優先)
+                if abs(x - c) + 8 < bd: best, bd = "sink", abs(x - c)
             return best
         anchors = sorted([(yc, a, b, _nf(t).replace(" ", "")) for t, a, b, yc, h in toks
-                          if ORDER_RE.fullmatch(_nf(t).replace(" ", "")) and assign((a + b) / 2) == "order" and (hdr_y is None or yc > hdr_y - 2)])
+                          if ORDER_RE.fullmatch(_nf(t).replace(" ", "")) and (hdr_y is None or yc > hdr_y - 2)])   # 注文番号は、11桁の形だけで決める(見出しが2段で『区分』『発注/要求元』が真下に並んでも、迷わない)
         if not anchors: continue
         hh = sum(h for *_, h in toks) / max(1, len(toks))
         for i, (ay, ax0, ax1, onum) in enumerate(anchors):
@@ -153,8 +155,9 @@ def extract(d):
                 role = assign((a + b) / 2); v = num(t)
                 if role in ("qty", "price", "amount") and v is not None:
                     if row[role] is None: row[role] = v
-                elif role == "name" and v is None and _nf(t) not in ("#", "-", "−", "ー"):
-                    name_parts.append(t)
+                elif v is None and _nf(t) not in ("#", "-", "−", "ー") and not re.fullmatch(r"\d{4}/\d{1,2}/\d{1,2}", _nf(t)) and a >= name_x0 - 15 and (
+                        (role == "name") or (abs(yc - ay) < 0.6 * hh and a < name_x1)):
+                    name_parts.append(t)   # 品名の列の左端より左(日付・取引先の列)のものは、品名に入れない。注文番号と同じ段の文字は、見出しの『提供引渡日』が真下にあっても、品名とする(個数の列より左まで)
             row["name"] = "".join(name_parts)[:80]
             xs = [x[1] for x in span] + [x[2] for x in span]; ys = [x[3] - x[4] / 2 for x in span] + [x[3] + x[4] / 2 for x in span]
             row["x0"], row["x1"], row["y0"], row["y1"] = min(xs), max(xs), min(ys), max(ys)
