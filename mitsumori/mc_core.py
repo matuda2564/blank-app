@@ -1327,6 +1327,9 @@ def doc_info(d, mode="qo"):
         tk = doc_tokens(d)
         return {"name": d.name, "kind": d.kind, "notes": d.notes[:6], "mode": "qq", "nlines": len(d.lines), "region": item_region(d.lines)[1] if d.src != "excel" else "Excelは全セルから拾った",
                 "rows": [{"m": v["raw"], "n": v["line"]["text"][:90], "q": None, "sure": v["sure"], "noise": bool(v.get("noise"))} for v in list(tk.values())[:300]]}
+    if mode == "ks":   # 京セラ: 注文番号・品名・個数・単価・金額を、全部の行、そのまま見せる(CSVで保存でき、あとで書類の代わりに読み込める)
+        return {"name": d.name, "kind": d.kind, "notes": d.notes[:8], "mode": "ks",
+                "rows": [{"o": r.get("model_raw"), "n": r.get("name"), "q": r.get("qty"), "p": r.get("price"), "a": r.get("amount")} for r in d.rows[:2000]]}
     return {"name": d.name, "kind": d.kind, "notes": d.notes[:6], "mode": "qo",
             "rows": [{"m": r.get("model_raw"), "n": r.get("name"), "q": r.get("qty")} for r in d.rows[:300]]}
 

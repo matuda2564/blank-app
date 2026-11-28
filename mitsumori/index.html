@@ -190,7 +190,7 @@ async function showResult(){
 }
 function cpTr(r){const c=r.cp||{};const cell=(t)=>`<td class="cpc" data-t="${esc(String(t==null?'':t))}" onclick="cpCell(this)" title="押すとコピー">${esc(String(t==null?'':t))}</td>`;return `<tr>${cell(c.model)}${cell(c.name)}${cell(c.qty)}<td><button class="sm" onclick="cpRow(${r._ci})">1行コピー</button></td></tr>`}
 function readPanel(p){
- const one=(lab,d)=>d?`<div><b>${esc(lab)}「${esc(d.name)}」</b> <small>(${esc(d.kind||'種類不明')}・${d.mode==='qq'?d.rows.length+'個の型番を発見':d.rows.length+'行を読み取り'})</small>${d.region?`<div class="meta">読んだ範囲: ${esc(d.region)}</div>`:''}${d.mode==='qq'?(d.rows.length?`<table class="rd"><tr><th>見つけた型番</th><th>その行の文字</th><th>確実?</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.m)}</td><td>${esc(r.n||'')}</td><td>${r.sure?'○':(r.noise?'ゴミの疑い(無視)':'要確認')}</td></tr>`).join('')}</table>`:`<div class="warn">型番らしい文字列を、1つも見つけられませんでした(読み取った行: ${d.nlines}行)</div>`):(d.rows.length?`<table class="rd"><tr><th>型式(読んだまま)</th><th>品名</th><th>数量</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.m)}</td><td>${esc(r.n||'')}</td><td>${esc(r.q==null?'':r.q)}</td></tr>`).join('')}</table>`:'<div class="warn">明細の行を、1行も読めませんでした</div>')}${d.notes.length?`<div class="meta">注意: ${esc(d.notes.join(' / '))}</div>`:''}</div>`:'';
+ const one=(lab,d)=>d&&d.mode==='ks'?ksOne(lab,d):d?`<div><b>${esc(lab)}「${esc(d.name)}」</b> <small>(${esc(d.kind||'種類不明')}・${d.mode==='qq'?d.rows.length+'個の型番を発見':d.rows.length+'行を読み取り'})</small>${d.region?`<div class="meta">読んだ範囲: ${esc(d.region)}</div>`:''}${d.mode==='qq'?(d.rows.length?`<table class="rd"><tr><th>見つけた型番</th><th>その行の文字</th><th>確実?</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.m)}</td><td>${esc(r.n||'')}</td><td>${r.sure?'○':(r.noise?'ゴミの疑い(無視)':'要確認')}</td></tr>`).join('')}</table>`:`<div class="warn">型番らしい文字列を、1つも見つけられませんでした(読み取った行: ${d.nlines}行)</div>`):(d.rows.length?`<table class="rd"><tr><th>型式(読んだまま)</th><th>品名</th><th>数量</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.m)}</td><td>${esc(r.n||'')}</td><td>${esc(r.q==null?'':r.q)}</td></tr>`).join('')}</table>`:'<div class="warn">明細の行を、1行も読めませんでした</div>')}${d.notes.length?`<div class="meta">注意: ${esc(d.notes.join(' / '))}</div>`:''}</div>`:'';
  return `<details class="rdp"><summary>読み取った中身を見る(ツールが、書類から、何を読んだか)</summary><div class="two">${one(rl(p)[0],p.qread)}${one(rl(p)[1],p.oread)}</div></details>`}
 function thumb(pid,anchor){return pid&&PAGES[pid]?`<img class="th" src="${PAGES[pid]}" title="押すと、見積と発注書を、並べて拡大します" onclick="openPairView('${anchor}')">`:'<small>(画像なし)</small>'}
 function openPairView(id){
@@ -214,6 +214,16 @@ function openPairView(id){
 function rl(p){return (p&&p.rl)||ROLES}
 function verdictOf(c,nopair){return nopair?'NP':c.DIFF?'DIFF':(c.REVIEW||c.NOORDER||c.OK_IMG)?'REV':'OK'}
 const VL={DIFF:'❌ 違い',REV:'⚠ 要確認',NP:'相手なし',OK:'✅ 一致'};
+const KSD={};
+function ksOne(lab,d){
+ const id='ksd'+Object.keys(KSD).length;KSD[id]=d;
+ const f=v=>v==null?'':(typeof v==='number'?v.toLocaleString('ja-JP',{maximumFractionDigits:2}):v);
+ const tot=d.rows.reduce((a,r)=>a+(r.a||0),0);
+ return `<div><b>${esc(lab)}「${esc(d.name)}」</b> <small>(${d.rows.length}行を読み取り・金額の合計 ${f(tot)}円)</small> <button class="sm pri" onclick="ksCsv('${id}')">この読み取り結果を、CSVで保存</button>${d.rows.length?`<table class="rd"><tr><th>注文番号</th><th>品名</th><th>個数</th><th>単価</th><th>金額</th></tr>${d.rows.map(r=>`<tr><td>${esc(r.o||'')}</td><td>${esc(r.n||'')}</td><td>${f(r.q)}</td><td>${f(r.p)}</td><td>${f(r.a)}</td></tr>`).join('')}</table>`:'<div class="warn">注文番号つきの行を、1行も読めませんでした</div>'}${d.notes.length?`<div class="meta">${esc(d.notes.join(' / '))}</div>`:''}</div>`}
+async function ksCsv(id){const d=KSD[id];if(!d)return;
+ const q=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+ const txt='注文番号,品名,数量,単価,金額\r\n'+d.rows.map(r=>[r.o,r.n,r.q,r.p,r.a].map(q).join(',')).join('\r\n')+'\r\n';
+ try{const r=await api('/api/savecsv?name='+encodeURIComponent(d.name),{method:'POST',body:new Blob([txt],{type:'text/csv'})});alert('デスクトップに保存しました:\n'+r.path+'\n\n(Excelで開いて直せます。直したCSVは、この書類の代わりに、読み込めます)')}catch(e){alert('保存できませんでした: '+e.message)}}
 function fileSummary(R){
  const files=new Map();let n=0;window.PAIRMAP={};
  const get=(v,role,name)=>{const k=v.vendor+'|'+role+'|'+name;if(!files.has(k))files.set(k,{vendor:v.vendor,role,name,c:{},partners:new Set(),anchor:null,nopair:false});return files.get(k)};
